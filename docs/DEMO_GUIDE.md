@@ -34,79 +34,64 @@ setup. All later commands reference these variables — if you open a new termin
 
 ## Lab Credentials
 
-> ⚠️ Passwords are not stored in this repo. Retrieve and export them before starting.
-
-### Export All AAP URLs and Passwords
-
-All values are discovered dynamically from the cluster — no hardcoded names or domains.
+> ⚠️ Run the entire block below in your terminal before starting. All variables are
+> discovered dynamically — no hardcoded names, no hardcoded domains.
+> Re-run this block whenever you open a new terminal session.
 
 ```bash
-# Discover the AAP namespace (adjust if you installed into a different namespace)
-AAP_NS="aap"
+# ── Namespace ────────────────────────────────────────────────────────────────
+export AAP_NS="aap"
 
-# Platform Gateway URL — from the AnsibleAutomationPlatform CR status
+# ── OCP API URL ──────────────────────────────────────────────────────────────
+export OCP_API_URL=$(oc whoami --show-server)
+
+# ── AAP instance names (used to derive secret names) ─────────────────────────
+AAP_INSTANCE=$(oc get AnsibleAutomationPlatform -n ${AAP_NS} \
+  -o jsonpath='{.items[0].metadata.name}')
+CTRL_INSTANCE=$(oc get AutomationController -n ${AAP_NS} \
+  -o jsonpath='{.items[0].metadata.name}')
+
+# ── URLs ──────────────────────────────────────────────────────────────────────
+# Platform Gateway — AAP UI and browser access
 export AAP_URL=$(oc get AnsibleAutomationPlatform -n ${AAP_NS} \
   -o jsonpath='{.items[0].status.URL}')
-echo "AAP_URL = $AAP_URL"
 
-# Automation Controller URL — from the AutomationController CR status
-# (used for /api/v2/ endpoints — Platform Gateway returns 404 for these)
+# Automation Controller — all /api/v2/ calls go here (Gateway returns 404)
 export AAP_CONTROLLER_URL=$(oc get AutomationController -n ${AAP_NS} \
   -o jsonpath='{.items[0].status.URL}')
-echo "AAP_CONTROLLER_URL = $AAP_CONTROLLER_URL"
 
-# Sanity-check: Controller must return HTTP 200 on /api/v2/config/
+# ── Passwords ─────────────────────────────────────────────────────────────────
+# Gateway admin password (AAP UI login)
+export AAP_ADMIN_PASS=$(oc get secret ${AAP_INSTANCE}-admin-password \
+  -n ${AAP_NS} -o jsonpath='{.data.password}' | base64 -d)
+
+# Controller admin password (EDA credential + token creation)
+export AAP_CONTROLLER_PASS=$(oc get secret ${CTRL_INSTANCE}-admin-password \
+  -n ${AAP_NS} -o jsonpath='{.data.password}' | base64 -d)
+
+# ── Verify everything ─────────────────────────────────────────────────────────
+echo "OCP_API_URL         = $OCP_API_URL"
+echo "AAP_URL             = $AAP_URL"
+echo "AAP_CONTROLLER_URL  = $AAP_CONTROLLER_URL"
+echo "AAP_ADMIN_PASS      len=${#AAP_ADMIN_PASS}"
+echo "AAP_CONTROLLER_PASS len=${#AAP_CONTROLLER_PASS}"
+echo ""
+# All lengths must be > 0. If any URL is empty the CR status field isn't populated yet —
+# wait for the operator to finish reconciling and re-run.
+
+# ── Sanity-check: Controller API must return HTTP 200 ─────────────────────────
 curl -sk -o /dev/null -w "Controller /api/v2/config/ → HTTP %{http_code}\n" \
   "${AAP_CONTROLLER_URL}/api/v2/config/" \
   -u "admin:${AAP_CONTROLLER_PASS}"
 ```
 
-> If either URL comes out empty, fall back to discovering routes directly:
-> ```bash
-> oc get routes -n aap -o custom-columns='NAME:.metadata.name,HOST:.spec.host'
-> # Gateway:    the route whose name matches the AnsibleAutomationPlatform CR name
-> # Controller: the route whose name contains 'controller'
-> export AAP_URL="https://<gateway-host>"
-> export AAP_CONTROLLER_URL="https://<controller-host>"
-> ```
+> **The following variables are set later** as their dependencies are created:
+> - `OCP_SA_TOKEN` — after the ServiceAccount is created (Section 1)
+> - `EDA_WEBHOOK_URL` — after the EDA activation and Route are up (Section 5)
+> - `AAP_MICROSERVICE_TOKEN` — after token generation (Section 11)
 
-### Export AAP Passwords
-
-In AAP 2.6, the Platform Gateway and the Automation Controller each have their own
-admin password in separate OCP Secrets. Both are discovered dynamically:
-
-```bash
-AAP_NS="aap"
-
-# Gateway admin password (used for AAP UI login)
-AAP_INSTANCE=$(oc get AnsibleAutomationPlatform -n ${AAP_NS} \
-  -o jsonpath='{.items[0].metadata.name}')
-export AAP_ADMIN_PASS=$(oc get secret ${AAP_INSTANCE}-admin-password \
-  -n ${AAP_NS} -o jsonpath='{.data.password}' | base64 -d)
-echo "AAP_ADMIN_PASS length: ${#AAP_ADMIN_PASS}"
-
-# Controller admin password (used for EDA credential and token creation)
-CTRL_INSTANCE=$(oc get AutomationController -n ${AAP_NS} \
-  -o jsonpath='{.items[0].metadata.name}')
-export AAP_CONTROLLER_PASS=$(oc get secret ${CTRL_INSTANCE}-admin-password \
-  -n ${AAP_NS} -o jsonpath='{.data.password}' | base64 -d)
-echo "AAP_CONTROLLER_PASS length: ${#AAP_CONTROLLER_PASS}"
-
-# Verify (should print a non-empty string)
-echo "AAP_ADMIN_PASS length: ${#AAP_ADMIN_PASS}"
-```
-
-> If the above fails (secret not found), list secrets to find the right name:
-> ```bash
-> oc get secrets -n aap | grep -i password
-> # Then replace 'demo-aap-admin-password' with the correct name and re-run
-> ```
-
-### OCP Console password
-
-The kubeadmin password for this Red Hat workshop cluster is provided via the
-workshop portal. Log in to `https://console-openshift-console.apps.cluster-jx4b7.dynamic.redhatworkshops.io`
-with `admin` / *(password from workshop portal)* before running any `oc` commands below.
+> Log in to the OCP Console with `admin` and the password from your workshop portal
+> before running any `oc` commands above.
 
 ---
 
