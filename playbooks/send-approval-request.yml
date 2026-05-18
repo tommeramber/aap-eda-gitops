@@ -3,12 +3,9 @@
 #
 # Node 1 in the Scenario B Approval Workflow.
 #
-# Sends an approval request email to the configured approver address.
-# The email body embeds the workflow job ID so the microservice can
-# identify which workflow to approve when it detects an "approved" reply.
-#
-# The microservice will approve all pending workflow approvals when it
-# detects the keyword — safe for demos where only one approval runs at a time.
+# Clones the repo at the pushed commit, reads each changed YAML file,
+# and sends an approval request email with the full file contents embedded
+# so the approver can see exactly what change they are approving.
 #
 # Required extra_vars (set "Prompt on Launch" in the Job Template):
 #   repo_url        - Git clone URL
@@ -22,7 +19,7 @@
 # AAP magic variable automatically injected inside a Workflow:
 #   tower_workflow_job_id  — ID of the running workflow job
 
-- name: Send email approval request for pending GitOps change
+- name: Send email approval request with file contents for pending GitOps change
   hosts: localhost
   gather_facts: false
   vars:
@@ -37,26 +34,45 @@
       ansible.builtin.set_fact:
         workflow_job_id: "{{ tower_workflow_job_id }}"
 
-    - name: Send approval request email to approver
-      community.general.mail:
-        host: "{{ lookup('env', 'SMTP_HOST') | default('smtp.gmail.com') }}"
-        port: "{{ lookup('env', 'SMTP_PORT') | default('587') | int }}"
-        username: "{{ lookup('env', 'SMTP_USER') }}"
-        password: "{{ lookup('env', 'SMTP_PASS') }}"
-        to: "{{ approver_email }}"
-        subject: "[GitOps APPROVAL REQUIRED] {{ commit_sha[:8] }}"
-        body: |
+    - name: Filter for YAML files in changed_files
+      ansible.builtin.set_fact:
+        yaml_files: "{{ changed_files | select('match', '.*\\.ya?ml$') | list }}"
+
+    - name: Clone repository at the pushed commit SHA
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: /tmp/gitops-approval-repo
+        version: "{{ commit_sha }}"
+        force: true
+      no_log: true
+      when: repo_url != '' and yaml_files | length > 0
+
+    - name: Read content of each changed YAML file
+      ansible.builtin.slurp:
+        src: "/tmp/gitops-approval-repo/{{ item }}"
+      loop: "{{ yaml_files }}"
+      register: file_slurps
+      when: yaml_files | length > 0
+
+    - name: Build email body with embedded file contents
+      ansible.builtin.set_fact:
+        email_body: |
           A GitOps change requires your approval before it is applied to the OCP cluster.
 
           Repository : {{ repo_url }}
           Commit     : {{ commit_sha }}
 
-          Changed manifests:
-          {% for f in changed_files %}
-            - {{ f }}
-          {% endfor %}
+          ════════════════════════════════════════════════════
+          CHANGED MANIFESTS ({{ yaml_files | length }} file(s))
+          ════════════════════════════════════════════════════
+          {% for result in file_slurps.results %}
 
+          File: {{ result.item }}
           ────────────────────────────────────────────────────
+          {{ result.content | b64decode }}
+          {% endfor %}
+          ════════════════════════════════════════════════════
+
           To APPROVE this change, reply to this email with the
           single word (nothing else in the body):
 
@@ -68,3 +84,13 @@
           detect your reply and approve the workflow continuation.)
 
           This approval request expires in 24 hours.
+
+    - name: Send approval request email to approver
+      community.general.mail:
+        host: "{{ lookup('env', 'SMTP_HOST') | default('smtp.gmail.com') }}"
+        port: "{{ lookup('env', 'SMTP_PORT') | default('587') | int }}"
+        username: "{{ lookup('env', 'SMTP_USER') }}"
+        password: "{{ lookup('env', 'SMTP_PASS') }}"
+        to: "{{ approver_email }}"
+        subject: "[GitOps APPROVAL REQUIRED] {{ commit_sha[:8] }} — {{ yaml_files | join(', ') }}"
+        body: "{{ email_body }}"
