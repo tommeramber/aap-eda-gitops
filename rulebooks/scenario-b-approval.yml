@@ -41,8 +41,7 @@
               repo_url: "{{ event.payload.repository.clone_url }}"
               commit_sha: "{{ event.payload.after }}"
               changed_files: >-
-                {{ event.payload.commits
-                   | map(attribute='modified') | sum(start=[])
-                   | select('match', '.*\.ya?ml$') | list }}
+                {{ event.payload.commits | map(attribute='modified') | sum(start=[]) +
+                   event.payload.commits | map(attribute='added') | sum(start=[]) }}
               repo_ref: "{{ event.payload.after }}"
               approver_email: "approver@example.com"
