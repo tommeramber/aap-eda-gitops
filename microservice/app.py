@@ -42,7 +42,7 @@ AAP_TOKEN        = os.environ["AAP_TOKEN"]
 AAP_VERIFY       = os.environ.get("AAP_VERIFY_SSL", "false").lower() == "true"
 
 APPROVAL_KEYWORD = os.environ.get("APPROVAL_KEYWORD", "approved").lower()
-SUBJECT_FILTER   = os.environ.get("SUBJECT_FILTER", "[GitOps APPROVAL REQUIRED]")
+SUBJECT_FILTER   = os.environ.get("SUBJECT_FILTER", "Re: [GitOps APPROVAL REQUIRED]")
 POLL_INTERVAL    = int(os.environ.get("POLL_INTERVAL_SECONDS", "30"))
 
 
@@ -138,6 +138,8 @@ def process_inbox() -> None:
                 imap.store(mid, "+FLAGS", "\\Seen")
                 continue
 
+            # Try to extract the specific approval node ID embedded by the playbook:
+            # Pattern:  Approval Reference: WFJ-<workflow_job_id>/<approval_node_id>
             match = re.search(r"WFJ-\d+/(\d+)", body)
             if match:
                 appr_id = match.group(1)
@@ -146,10 +148,12 @@ def process_inbox() -> None:
                     if call_approve(appr_id):
                         imap.store(mid, "+FLAGS", "\\Seen")
                 else:
+                    # ID may have just appeared — try anyway
                     log.warning("Approval ID %s not in current pending list; trying anyway", appr_id)
                     if call_approve(appr_id):
                         imap.store(mid, "+FLAGS", "\\Seen")
             else:
+                # No specific ID — approve all pending (safe for single-workflow demos)
                 log.info("No specific ID found; approving all %d pending approvals", len(pending))
                 for appr_id in list(pending.keys()):
                     call_approve(appr_id)

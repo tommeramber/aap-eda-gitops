@@ -565,11 +565,21 @@ In AAP: **Templates → Add → Job Template**
 | Playbook | `playbooks/send-approval-request.yml` |
 | Inventory | `Demo Inventory` |
 | Credentials | `ocp-demo-cluster` + `smtp-approval` |
-| Extra Variables | `AAP_CONTROLLER_URL: <echo $AAP_CONTROLLER_URL>` |
+| Extra Variables | See block below |
 | Extra Variables: Prompt on Launch | **CHECKED** |
 
-> The playbook resolves `aap_base_url` via `lookup('env', 'AAP_CONTROLLER_URL')`.
-> Setting it here as an extra_var makes it available as an environment variable at runtime.
+```yaml
+# Paste into the Extra Variables field of the job template:
+AAP_CONTROLLER_URL: "<echo $AAP_CONTROLLER_URL>"
+approver_email: "example@example.com"   # address that receives approval request and replies "approved"
+```
+
+> `approver_email` is the address the approval request is sent **to**.
+> The IMAP microservice monitors the **same inbox** — so the approver and the monitored inbox are the same address.
+> When you reply "approved", the reply lands in that inbox and the microservice picks it up.
+>
+> The microservice only processes emails with subject starting `Re: [GitOps APPROVAL REQUIRED]`
+> to avoid accidentally approving the original request email (which also lands in the inbox).
 
 ### Step 4 — Create Workflow Template
 
@@ -688,7 +698,7 @@ Set your IMAP credentials, then let `sed` fill everything else from the session 
 ```bash
 # Set IMAP variables (the only values you need to type manually)
 export IMAP_HOST="imap.gmail.com"
-export IMAP_USER="example@example.com"   # inbox that receives approval replies
+export IMAP_USER="example@example.com"   # same address as approver_email in the job template
 export IMAP_PASS="your-app-password"     # Gmail App Password
 
 # Generate the secret file — sed substitutes all placeholders from exported variables
