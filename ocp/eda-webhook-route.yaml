@@ -6,11 +6,16 @@
 # This Route exposes that service so GitHub (or any external system) can
 # send webhook events to EDA.
 #
+# The targetPort follows the EDA naming convention: <serviceName>-<port>
+#
 # Apply with:
 #   oc apply -f ocp/eda-webhook-route.yaml
 #
 # Get the final URL:
 #   oc get route eda-gitops-webhook -n aap -o jsonpath='{.spec.host}'
+#
+# Configure this URL as the Payload URL in GitHub Webhooks:
+#   https://<route-host>
 
 apiVersion: route.openshift.io/v1
 kind: Route
@@ -21,7 +26,9 @@ metadata:
     app: eda-gitops
     managed-by: eda
 spec:
-  host: eda-webhook.apps.cluster-jx4b7.dynamic.redhatworkshops.io
+  # host is intentionally omitted — OCP assigns it automatically based on the cluster domain
+  # Retrieve the assigned host after applying with:
+  #   oc get route eda-gitops-webhook -n aap -o jsonpath='{.spec.host}'
   port:
     targetPort: eda-gitops-webhook-5000
   to:

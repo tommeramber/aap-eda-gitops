@@ -26,7 +26,7 @@ setup. All later commands reference these variables — if you open a new termin
 > handles browser traffic but does **not** expose `/api/v2/` — so EDA's rulebook worker
 > gets a 404 when it tries to connect. EDA must be pointed at the **Automation
 > Controller's own route** (`$AAP_CONTROLLER_URL`) which does serve `/api/v2/`.
-> All other API calls (token creation, approval endpoints) go through `$AAP_URL` as normal.
+> All `/api/v2/` calls (token creation, approval endpoints) go through `$AAP_CONTROLLER_URL`.
 
 > Run `echo $VARIABLE_NAME` any time a UI field asks you to paste a value.
 
@@ -36,62 +36,61 @@ setup. All later commands reference these variables — if you open a new termin
 
 > ⚠️ Passwords are not stored in this repo. Retrieve and export them before starting.
 
-### Export the AAP URLs
+### Export All AAP URLs and Passwords
+
+All values are discovered dynamically from the cluster — no hardcoded names or domains.
 
 ```bash
-# Platform Gateway — used for the AAP UI, REST API calls, and the microservice Secret
-export AAP_URL="https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io"
-echo $AAP_URL
+# Discover the AAP namespace (adjust if you installed into a different namespace)
+AAP_NS="aap"
 
-# Automation Controller route — used ONLY in the EDA credential
-# In AAP 2.6 the gateway does not proxy /api/v2/, so EDA must connect directly
-# to the Controller's own route.
-export AAP_CONTROLLER_URL="https://demo-aap-controller-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io"
-echo $AAP_CONTROLLER_URL
+# Platform Gateway URL — from the AnsibleAutomationPlatform CR status
+export AAP_URL=$(oc get AnsibleAutomationPlatform -n ${AAP_NS} \
+  -o jsonpath='{.items[0].status.URL}')
+echo "AAP_URL = $AAP_URL"
 
-# Sanity-check: must return HTTP 200
+# Automation Controller URL — from the AutomationController CR status
+# (used for /api/v2/ endpoints — Platform Gateway returns 404 for these)
+export AAP_CONTROLLER_URL=$(oc get AutomationController -n ${AAP_NS} \
+  -o jsonpath='{.items[0].status.URL}')
+echo "AAP_CONTROLLER_URL = $AAP_CONTROLLER_URL"
+
+# Sanity-check: Controller must return HTTP 200 on /api/v2/config/
 curl -sk -o /dev/null -w "Controller /api/v2/config/ → HTTP %{http_code}\n" \
   "${AAP_CONTROLLER_URL}/api/v2/config/" \
-  -H "Authorization: Bearer ${AAP_EDA_TOKEN}"
+  -u "admin:${AAP_CONTROLLER_PASS}"
 ```
 
-> If the cluster domain is different, discover the correct route:
+> If either URL comes out empty, fall back to discovering routes directly:
 > ```bash
-> oc get routes -n aap
-> # Look for the route that is NOT demo-aap-aap — e.g. demo-aap-controller-aap
-> export AAP_CONTROLLER_URL="https://<that-host>"
+> oc get routes -n aap -o custom-columns='NAME:.metadata.name,HOST:.spec.host'
+> # Gateway:    the route whose name matches the AnsibleAutomationPlatform CR name
+> # Controller: the route whose name contains 'controller'
+> export AAP_URL="https://<gateway-host>"
+> export AAP_CONTROLLER_URL="https://<controller-host>"
 > ```
 
-### Export the AAP Controller password
+### Export AAP Passwords
 
 In AAP 2.6, the Platform Gateway and the Automation Controller each have their own
-admin password stored in separate OCP Secrets. The EDA credential must use the
-**Controller's** password (`demo-aap-controller-admin-password`), not the gateway's.
+admin password in separate OCP Secrets. Both are discovered dynamically:
 
 ```bash
-export AAP_CONTROLLER_PASS=$(oc get secret demo-aap-controller-admin-password \
-  -n aap \
-  -o jsonpath='{.data.password}' | base64 -d)
+AAP_NS="aap"
 
-# Verify (should print a non-empty string)
+# Gateway admin password (used for AAP UI login)
+AAP_INSTANCE=$(oc get AnsibleAutomationPlatform -n ${AAP_NS} \
+  -o jsonpath='{.items[0].metadata.name}')
+export AAP_ADMIN_PASS=$(oc get secret ${AAP_INSTANCE}-admin-password \
+  -n ${AAP_NS} -o jsonpath='{.data.password}' | base64 -d)
+echo "AAP_ADMIN_PASS length: ${#AAP_ADMIN_PASS}"
+
+# Controller admin password (used for EDA credential and token creation)
+CTRL_INSTANCE=$(oc get AutomationController -n ${AAP_NS} \
+  -o jsonpath='{.items[0].metadata.name}')
+export AAP_CONTROLLER_PASS=$(oc get secret ${CTRL_INSTANCE}-admin-password \
+  -n ${AAP_NS} -o jsonpath='{.data.password}' | base64 -d)
 echo "AAP_CONTROLLER_PASS length: ${#AAP_CONTROLLER_PASS}"
-```
-
-> If the secret name differs, list all password secrets to find the right one:
-> ```bash
-> oc get secrets -n aap | grep -i password
-> # Look for the one containing 'controller'
-> ```
-
-### Export the AAP admin password
-
-The secret name follows the pattern `<instance-name>-admin-password`.
-Your AAP instance is named `demo-aap`:
-
-```bash
-export AAP_ADMIN_PASS=$(oc get secret demo-aap-admin-password \
-  -n aap \
-  -o jsonpath='{.data.password}' | base64 -d)
 
 # Verify (should print a non-empty string)
 echo "AAP_ADMIN_PASS length: ${#AAP_ADMIN_PASS}"
