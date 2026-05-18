@@ -31,13 +31,11 @@
     repo_url: ""
     commit_sha: ""
     changed_files: []
-    # Set this in the Job Template Extra Variables so it doesn't need to be
-    # hardcoded here. The approver receives the email and replies "approved".
-    # The IMAP microservice must monitor this same inbox.
-    approver_email: "example@example.com"
-    # Resolved from the AAP_CONTROLLER_URL env var injected by the credential type.
-    # Set AAP_CONTROLLER_URL in the job template extra_vars or via a custom credential.
-    aap_base_url: "{{ lookup('env', 'AAP_CONTROLLER_URL') }}"
+    approver_email: "approver@example.com"
+    # Set this in the Job Template Extra Variables (not via env — it's an Ansible var):
+    #   aap_base_url: "https://<your-controller-route>"
+    # Retrieve the value with: echo $AAP_CONTROLLER_URL
+    aap_base_url: ""
 
   tasks:
 
