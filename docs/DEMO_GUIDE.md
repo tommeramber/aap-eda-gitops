@@ -496,7 +496,7 @@ oc get networkpolicy -A
 
 ---
 
-## 8. Scenario B — AAP Workflow Template
+## 8. Scenario B — Full Setup
 
 **Why SMTP is needed here (but not in Scenario A):**  
 The `send-approval-request.yml` playbook must embed a unique `WFJ-<id>/<approval_node_id>`
@@ -504,7 +504,7 @@ reference into the email body so the microservice can approve the right workflow
 AAP's built-in notification system can't add custom body content, so this email must be
 sent by the playbook directly via `community.general.mail`.
 
-### Step 1 — Create SMTP Credential Type (for Scenario B only)
+### Step 1 — Create SMTP Credential Type
 
 In AAP: **Administration → Credential Types → Add**  
 Name: `SMTP (Approval Email)`
@@ -560,17 +560,18 @@ In AAP: **Templates → Add → Job Template**
 | Field | Value |
 |---|---|
 | Name | `gitops-send-approval-request` |
+| Job Type | `Run` |
 | Project | `aap-gitops-demo` |
 | Playbook | `playbooks/send-approval-request.yml` |
 | Inventory | `Demo Inventory` |
 | Credentials | `ocp-demo-cluster` + `smtp-approval` |
-| Extra Variables | `AAP_CONTROLLER_URL: <paste echo $AAP_CONTROLLER_URL>` |
+| Extra Variables | `AAP_CONTROLLER_URL: <echo $AAP_CONTROLLER_URL>` |
 | Extra Variables: Prompt on Launch | **CHECKED** |
 
 > The playbook resolves `aap_base_url` via `lookup('env', 'AAP_CONTROLLER_URL')`.
 > Setting it here as an extra_var makes it available as an environment variable at runtime.
 
-### Step 2 — Create Workflow Template
+### Step 4 — Create Workflow Template
 
 In AAP: **Templates → Add → Workflow Template**
 
@@ -580,7 +581,7 @@ In AAP: **Templates → Add → Workflow Template**
 | Organization | `Default` |
 | Extra Variables: Prompt on Launch | **CHECKED** |
 
-### Step 3 — Build Workflow Nodes (Workflow Visualizer)
+### Step 5 — Build Workflow Nodes (Workflow Visualizer)
 
 Open the Workflow Visualizer and add three connected nodes:
 
@@ -593,6 +594,23 @@ Open the Workflow Visualizer and add three connected nodes:
 > **How `tower_workflow_job_id` works:** AAP automatically injects this variable when
 > a job template runs inside a Workflow. The `send-approval-request` playbook uses it
 > to query the AAP API for the pending approval node ID and embed it in the email body.
+
+### Step 6 — Create Rulebook Activation (Scenario B)
+
+In EDA UI: **Rulebook Activations → Create**
+
+| Field | Value |
+|---|---|
+| Name | `gitops-scenario-b-approval` |
+| Project | `aap-gitops-demo` |
+| Rulebook | `scenario-b-approval.yml` |
+| Decision Environment | `de-supported` (default) |
+| AAP Controller Credential | `aap-controller-credential` |
+| Service Name | `eda-gitops-webhook` |
+
+> ⚠️ **Only one activation should be Running at a time.**  
+> Before running Scenario B: **Stop** `gitops-scenario-a-direct`, then **Start** `gitops-scenario-b-approval`.  
+> Both activations use the same Service Name (`eda-gitops-webhook`) and Route — no Route changes needed.
 
 ---
 
@@ -738,10 +756,12 @@ Any variable showing `len=0` needs to be re-exported before the demo.
 | 9 | OCP: EDA Route responds | `curl -sk -o /dev/null -w "%{http_code}" "${EDA_WEBHOOK_URL}"` (not 000) |
 | 10 | GitHub: webhook last delivery = 200 | Repo → Settings → Webhooks |
 | *(Scenario B only)* | | |
-| 11 | AAP: `smtp-approval` credential + `gitops-send-approval-request` job template | AAP UI → Credentials / Templates |
-| 12 | AAP: `gitops-approval-workflow` workflow (3 nodes) | AAP UI → Templates → Visualizer |
-| 13 | OCP: `email-approver` pod Running | `oc get pods -n aap \| grep email-approver` |
-| 14 | Microservice log shows "starting" | `oc logs deployment/email-approver -n aap \| head -5` |
+| 11 | AAP: `smtp-approval` credential created | AAP UI → Credentials |
+| 12 | AAP: `gitops-send-approval-request` job template created | AAP UI → Templates |
+| 13 | AAP: `gitops-approval-workflow` workflow template (3 nodes) | AAP UI → Templates → Visualizer |
+| 14 | EDA: `gitops-scenario-b-approval` activation created | EDA UI → Rulebook Activations |
+| 15 | OCP: `email-approver` pod Running | `oc get pods -n aap \| grep email-approver` |
+| 16 | Microservice log shows "starting" | `oc logs deployment/email-approver -n aap \| head -5` |
 
 ---
 
@@ -764,7 +784,7 @@ Any variable showing `len=0` needs to be re-exported before the demo.
 
 | Step | Action | Show the Audience |
 |---|---|---|
-| 1 | Deactivate `scenario-a`, activate `scenario-b-approval` | EDA UI → toggle activations |
+| 1 | Stop `gitops-scenario-a-direct` → Start `gitops-scenario-b-approval` | EDA UI → Rulebook Activations |
 | 2 | Edit and push a NetworkPolicy YAML to main | GitHub UI |
 | 3 | Watch EDA fire → AAP Workflow starts | EDA + AAP UI side by side |
 | 4 | Show Workflow Visualizer: Node 1 running | AAP Workflow Visualizer |
