@@ -651,11 +651,14 @@ This token allows the email-approver microservice to call the AAP approval API.
 It is created here — close to where it is used — not in Section 2.
 
 ```bash
+# The token endpoint is on the Automation Controller — use $AAP_CONTROLLER_URL and
+# $AAP_CONTROLLER_PASS, NOT $AAP_URL (Platform Gateway returns 404 for /api/v2/)
+
 # Step 1a: create the token and capture the full JSON response
 AAP_TOKEN_RESPONSE=$(curl -sk -X POST \
-  "${AAP_URL}/api/v2/tokens/" \
+  "${AAP_CONTROLLER_URL}/api/v2/tokens/" \
   -H "Content-Type: application/json" \
-  -u "admin:${AAP_ADMIN_PASS}" \
+  -u "admin:${AAP_CONTROLLER_PASS}" \
   -d '{"description": "email-approver-microservice", "scope": "write"}')
 
 # Step 1b: inspect the response — should show a JSON object with a "token" field
@@ -669,13 +672,8 @@ export AAP_MICROSERVICE_TOKEN=$(echo "$AAP_TOKEN_RESPONSE" | \
 echo "AAP_MICROSERVICE_TOKEN length: ${#AAP_MICROSERVICE_TOKEN}"
 ```
 
-> If Step 1b shows `{"detail": "Authentication credentials were not provided."}`,
-> `$AAP_ADMIN_PASS` is not set. Re-run the export from the Lab Credentials section.
->
-> If Step 1b shows `{"detail": "Invalid token."}` or a 401, check the password value:
-> ```bash
-> echo $AAP_ADMIN_PASS
-> ```
+> If Step 1b shows an HTML 404 page → you used `$AAP_URL` instead of `$AAP_CONTROLLER_URL`.  
+> If Step 1b shows `401 Unauthorized` → check `echo $AAP_CONTROLLER_PASS` is non-empty.
 
 ### Step 2 — Fill In and Apply the OCP Secret
 
@@ -690,7 +688,7 @@ Edit `ocp/email-approver-secret.yaml` and set:
 | `IMAP_HOST` | your IMAP server (e.g. `imap.gmail.com`) |
 | `IMAP_USER` | the inbox address that receives approval replies |
 | `IMAP_PASS` | IMAP password or Gmail App Password |
-| `AAP_BASE_URL` | `echo $AAP_URL` → paste output |
+| `AAP_BASE_URL` | `echo $AAP_CONTROLLER_URL` → paste output (controller URL, not gateway) |
 | `AAP_TOKEN` | `echo $AAP_MICROSERVICE_TOKEN` → paste output |
 
 ```bash
@@ -788,15 +786,17 @@ Any variable showing `len=0` needs to be re-exported before the demo.
 ### AAP Workflow Approval API Reference
 
 ```bash
+# All /api/v2/ calls go to $AAP_CONTROLLER_URL, not $AAP_URL (Platform Gateway)
+
 # List all pending approvals
 curl -sk \
-  "${AAP_URL}/api/v2/workflow_approvals/?status=pending" \
+  "${AAP_CONTROLLER_URL}/api/v2/workflow_approvals/?status=pending" \
   -H "Authorization: Bearer ${AAP_MICROSERVICE_TOKEN}" \
   | python3 -m json.tool
 
 # Approve a specific approval node (replace 42 with the real ID from the response above)
 curl -sk -X POST \
-  "${AAP_URL}/api/v2/workflow_approvals/42/approve/" \
+  "${AAP_CONTROLLER_URL}/api/v2/workflow_approvals/42/approve/" \
   -H "Authorization: Bearer ${AAP_MICROSERVICE_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{}'
