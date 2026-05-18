@@ -7,51 +7,58 @@ AAP 2.6.0 on OpenShift 4.18.20 | May 2026
 
 ## Session Variables
 
-Throughout this guide, generated tokens, URLs, and passwords are saved to shell
-environment variables. Run every `export` command in the **same terminal session**
-you use for the rest of the setup.
+Run every `export` command in the **same terminal session** you use for the rest of the
+setup. All later commands reference these variables — if you open a new terminal, re-export them.
 
-A quick reference of all variables set during the demo:
-
-| Variable | Set in | Purpose |
+| Variable | Set in | Used in |
 |---|---|---|
-| `AAP_ADMIN_PASS` | Lab Credentials | AAP UI login, EDA credential, token generation |
-| `OCP_SA_TOKEN` | Section 1 Step 2 | Pasted into the AAP OCP credential |
-| `OCP_API_URL` | Section 1 Step 3 | Pasted into the AAP OCP credential |
-| `AAP_MICROSERVICE_TOKEN` | Section 2 Step 4 | Pasted into the OCP Secret for the microservice |
-| `EDA_WEBHOOK_URL` | Section 5 | GitHub Webhook Payload URL + curl test target |
+| `AAP_URL` | Lab Credentials | Every AAP API call |
+| `AAP_ADMIN_PASS` | Lab Credentials | EDA credential (Section 5), token generation (Section 11) |
+| `OCP_SA_TOKEN` | Section 1 Step 2 | AAP OCP credential (Section 2) |
+| `OCP_API_URL` | Section 1 Step 3 | AAP OCP credential (Section 2) |
+| `EDA_WEBHOOK_URL` | Section 5 Step 4 | GitHub webhook config (Section 7), curl test |
+| `AAP_MICROSERVICE_TOKEN` | Section 11 Step 1 | OCP Secret for the email-approver microservice |
 
-> Run `echo $VARIABLE_NAME` to display the value whenever a UI field asks you to paste it in.
+> Run `echo $VARIABLE_NAME` any time a UI field asks you to paste a value.
 
 ---
 
 ## Lab Credentials
 
-> ⚠️ Passwords are intentionally not stored in this repo. Retrieve them with the commands below and export them before starting.
+> ⚠️ Passwords are not stored in this repo. Retrieve and export them before starting.
 
-**OpenShift Console:**  
-`https://console-openshift-console.apps.cluster-jx4b7.dynamic.redhatworkshops.io`  
-Username: `admin`
+### Export the AAP base URL
 
 ```bash
-# Retrieve and export the OCP kubeadmin password
-# (check your cluster provisioning email if the secret doesn't exist)
-export OCP_KUBEADMIN_PASS=$(oc get secret kubeadmin -n kube-system \
-  -o jsonpath='{.data.kubeadmin}' | base64 -d)
-echo $OCP_KUBEADMIN_PASS
+export AAP_URL="https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io"
+echo $AAP_URL
 ```
 
-**AAP Controller:**  
-`https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io`  
-Username: `admin`
+### Export the AAP admin password
+
+The secret name follows the pattern `<instance-name>-admin-password`.
+Your AAP instance is named `demo-aap`:
 
 ```bash
-# Retrieve and export the AAP admin password from the operator Secret
-export AAP_ADMIN_PASS=$(oc get secret -n aap \
-  $(oc get secret -n aap -o name | grep admin-password | head -1 | cut -d/ -f2) \
+export AAP_ADMIN_PASS=$(oc get secret demo-aap-admin-password \
+  -n aap \
   -o jsonpath='{.data.password}' | base64 -d)
-echo $AAP_ADMIN_PASS
+
+# Verify (should print a non-empty string)
+echo "AAP_ADMIN_PASS length: ${#AAP_ADMIN_PASS}"
 ```
+
+> If the above fails (secret not found), list secrets to find the right name:
+> ```bash
+> oc get secrets -n aap | grep -i password
+> # Then replace 'demo-aap-admin-password' with the correct name and re-run
+> ```
+
+### OCP Console password
+
+The kubeadmin password for this Red Hat workshop cluster is provided via the
+workshop portal. Log in to `https://console-openshift-console.apps.cluster-jx4b7.dynamic.redhatworkshops.io`
+with `admin` / *(password from workshop portal)* before running any `oc` commands below.
 
 ---
 
@@ -70,41 +77,43 @@ echo $AAP_ADMIN_PASS
 ## Table of Contents
 
 1. [OCP — Service Account Setup](#1-ocp--service-account-setup)
-2. [AAP — Custom Credential Type & Credentials](#2-aap--custom-credential-type--credentials)
+2. [AAP — Core Credentials & Project](#2-aap--core-credentials--project)
 3. [Git Repository Structure](#3-git-repository-structure)
 4. [EDA Rulebooks](#4-eda-rulebooks)
 5. [EDA — Project, Activation & OCP Route](#5-eda--project-activation--ocp-route)
-6. [Scenario A — Playbook & Job Template](#6-scenario-a--playbook--job-template)
+6. [Scenario A — Job Template & SMTP Credential](#6-scenario-a--job-template--smtp-credential)
 7. [GitHub Webhook Configuration](#7-github-webhook-configuration)
 8. [Scenario B — AAP Workflow Template](#8-scenario-b--aap-workflow-template)
 9. [Scenario B — Approval Request Playbook](#9-scenario-b--approval-request-playbook)
-10. [Email Approval Microservice (Python)](#10-email-approval-microservice-python)
-11. [OCP Deployment for the Microservice](#11-ocp-deployment-for-the-microservice)
+10. [Email Approval Microservice — Build & Push](#10-email-approval-microservice--build--push)
+11. [Scenario B — OCP Deployment & Token](#11-scenario-b--ocp-deployment--token)
 12. [Demo Walkthrough Checklist](#12-demo-walkthrough-checklist)
 
 ---
 
 ## 1. OCP — Service Account Setup
 
-Create a `ServiceAccount` with `cluster-admin` in `openshift-monitoring`. AAP will
-store the resulting token as a credential to authenticate against the OCP API.
+Create a `ServiceAccount` with `cluster-admin` in `openshift-monitoring`.
+AAP stores the resulting token as a credential to authenticate against the OCP API.
 
 ### Step 1 — Create ServiceAccount and ClusterRoleBinding
 
 ```bash
 oc apply -f ocp/sa-and-crb.yaml
+
+# Verify
+oc get sa aap-gitops-sa -n openshift-monitoring
 ```
 
 ### Step 2 — Generate and Export the SA Token
 
 ```bash
-# Export a 1-year token directly into the session variable
 export OCP_SA_TOKEN=$(oc create token aap-gitops-sa \
   -n openshift-monitoring \
   --duration=8760h)
 
-# Verify it was captured (should print a long JWT string)
-echo $OCP_SA_TOKEN
+# Verify — should print a JWT (long string starting with "eyJ")
+echo "${OCP_SA_TOKEN:0:40}..."
 ```
 
 > **Alternative — non-expiring Secret-based token:**
@@ -120,13 +129,14 @@ echo $OCP_SA_TOKEN
 > type: kubernetes.io/service-account-token
 > EOF
 >
+> # Wait a few seconds for the token to be populated, then export
 > export OCP_SA_TOKEN=$(oc get secret aap-gitops-sa-token \
 >   -n openshift-monitoring \
 >   -o jsonpath='{.data.token}' | base64 -d)
-> echo $OCP_SA_TOKEN
+> echo "${OCP_SA_TOKEN:0:40}..."
 > ```
 
-### Step 3 — Export the API Server URL
+### Step 3 — Export the OCP API Server URL
 
 ```bash
 export OCP_API_URL=$(oc whoami --show-server)
@@ -136,7 +146,11 @@ echo $OCP_API_URL
 
 ---
 
-## 2. AAP — Custom Credential Type & Credentials
+## 2. AAP — Core Credentials & Project
+
+> **What belongs here:** only the credentials needed to get AAP talking to OCP and Git.
+> The SMTP credential (for notifications) is created in Section 6 alongside the job template.
+> The microservice token (for Scenario B) is generated in Section 11.
 
 ### Step 1 — Create Custom Credential Type for OCP
 
@@ -174,10 +188,12 @@ In AAP: **Credentials → Add**, using type `OCP Cluster (SA Token)`.
 | Name | `ocp-demo-cluster` |
 | Organization | `Default` |
 | Credential Type | `OCP Cluster (SA Token)` |
-| OCP API Server URL | run `echo $OCP_API_URL` and paste the output |
-| OCP SA Bearer Token | run `echo $OCP_SA_TOKEN` and paste the output |
+| OCP API Server URL | `echo $OCP_API_URL` → paste output |
+| OCP SA Bearer Token | `echo $OCP_SA_TOKEN` → paste output |
 
-### Step 3 — Create Git Credential (if repo is private)
+### Step 3 — Create Git Credential (only if repo is private)
+
+This repo is public — skip this step unless you forked it to a private repo.
 
 | Field | Value |
 |---|---|
@@ -186,28 +202,20 @@ In AAP: **Credentials → Add**, using type `OCP Cluster (SA Token)`.
 | Username | your GitHub username |
 | Password/Token | GitHub Personal Access Token (repo scope) |
 
-### Step 4 — Generate and Export the AAP Service Token (Scenario B)
+### Step 4 — Create AAP Project
 
-This token is used by the email-approver microservice to call the AAP approval API.
+In AAP: **Projects → Add**
 
-```bash
-# Use $AAP_ADMIN_PASS exported from the Lab Credentials section above
-export AAP_MICROSERVICE_TOKEN=$(curl -sk -X POST \
-  "https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io/api/v2/users/1/tokens/" \
-  -H "Content-Type: application/json" \
-  -u admin:${AAP_ADMIN_PASS} \
-  -d '{"description": "email-approver-microservice", "scope": "write"}' \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+| Field | Value |
+|---|---|
+| Name | `aap-gitops-demo` |
+| Source Control Type | `Git` |
+| Source Control URL | `https://github.com/tommeramber/aap-eda-gitops` |
+| Source Control Branch | `main` |
+| Update Revision on Launch | Checked |
+| Source Control Credential | leave empty (public repo) |
 
-echo $AAP_MICROSERVICE_TOKEN
-```
-
-> You will paste `$AAP_MICROSERVICE_TOKEN` into the OCP Secret in Section 11.
-
-### Step 5 — Create SMTP Credential (for email notifications)
-
-Create a custom credential type that injects `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
-`SMTP_PASS` as environment variables — same pattern as the OCP credential type above.
+Wait for the sync status to show **Successful** before continuing.
 
 ---
 
@@ -216,22 +224,21 @@ Create a custom credential type that injects `SMTP_HOST`, `SMTP_PORT`, `SMTP_USE
 ```
 aap-eda-gitops/
 ├── rulebooks/
-│   ├── scenario-a-direct.yml          # EDA rulebook — Scenario A
-│   └── scenario-b-approval.yml        # EDA rulebook — Scenario B
+│   ├── scenario-a-direct.yml
+│   └── scenario-b-approval.yml
 ├── playbooks/
-│   ├── apply-manifest.yml             # Applies changed YAML to OCP + notifies
-│   └── send-approval-request.yml      # Sends approval request email (Scenario B)
-├── collections/
-│   └── requirements.yml               # Ansible collection dependencies
+│   ├── apply-manifest.yml
+│   └── send-approval-request.yml
+├── collections/requirements.yml
 ├── microservice/
-│   ├── app.py                         # Email approval microservice (Python)
-│   ├── requirements.txt               # Python dependencies
-│   └── Dockerfile                     # UBI9 container image
+│   ├── app.py
+│   ├── requirements.txt
+│   └── Dockerfile
 ├── ocp/
-│   ├── sa-and-crb.yaml                # ServiceAccount + ClusterRoleBinding for AAP
-│   ├── eda-webhook-route.yaml         # OCP Route to expose EDA webhook
-│   ├── email-approver-secret.example.yaml  # Secret template (fill in and apply)
-│   └── email-approver-deploy.yaml     # Deployment for the approval microservice
+│   ├── sa-and-crb.yaml
+│   ├── eda-webhook-route.yaml
+│   ├── email-approver-secret.example.yaml
+│   └── email-approver-deploy.yaml
 └── docs/DEMO_GUIDE.md
 ```
 
@@ -239,9 +246,9 @@ aap-eda-gitops/
 
 ## 4. EDA Rulebooks
 
-> Activate **only one rulebook at a time**. Toggle between Scenario A and B in EDA UI.
+> Activate **only one rulebook at a time**. Toggle in EDA UI when switching scenarios.
 
-See `rulebooks/scenario-a-direct.yml` and `rulebooks/scenario-b-approval.yml` in this repo.
+See `rulebooks/scenario-a-direct.yml` and `rulebooks/scenario-b-approval.yml`.
 
 ---
 
@@ -255,12 +262,14 @@ In EDA UI: **Credentials → Create**
 |---|---|
 | Name | `aap-controller-credential` |
 | Credential Type | `Red Hat Ansible Automation Platform` |
-| URL | `https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io` |
+| URL | `echo $AAP_URL` → paste output |
 | Username | `admin` |
-| Password | run `echo $AAP_ADMIN_PASS` and paste the output |
-| SSL Verify | `False` |
+| Password | `echo $AAP_ADMIN_PASS` → paste output |
+| SSL Verify | `False` (self-signed cert in this lab) |
 
 ### Step 2 — Create EDA Project
+
+In EDA UI: **Projects → Create**
 
 | Field | Value |
 |---|---|
@@ -270,7 +279,16 @@ In EDA UI: **Credentials → Create**
 | Branch | `main` |
 | SCM Credential | leave empty (public repo) |
 
-### Step 3 — Create Rulebook Activation (Scenario A)
+Wait for sync to show **Completed**.
+
+### Step 3 — Decision Environment
+
+Use the default DE. If it is not pre-populated, pull:  
+`registry.redhat.io/ansible-automation-platform-26/de-supported-rhel9:latest`
+
+### Step 4 — Create Rulebook Activation (Scenario A)
+
+In EDA UI: **Rulebook Activations → Create**
 
 | Field | Value |
 |---|---|
@@ -281,28 +299,86 @@ In EDA UI: **Credentials → Create**
 | AAP Controller Credential | `aap-controller-credential` |
 | Service Name | `eda-gitops-webhook` |
 
-### Step 4 — Expose the EDA Webhook and Export Its URL
+Wait for the activation status to show **Running**.
+
+### Step 5 — Discover the EDA Service and Expose the Webhook URL
+
+After the activation is Running, AAP creates a Service in the `aap` namespace.
+Verify it exists and export the full URL:
 
 ```bash
+# Verify the Service was created
+oc get svc -n aap | grep eda-gitops-webhook
+
+# Apply the Route
 oc apply -f ocp/eda-webhook-route.yaml
 
-# Export the full webhook URL into a session variable
+# Export the full webhook URL
 export EDA_WEBHOOK_URL="https://$(oc get route eda-gitops-webhook \
   -n aap -o jsonpath='{.spec.host}')"
 
+# Verify — should print a full https:// URL
 echo $EDA_WEBHOOK_URL
-# Expected: https://eda-webhook.apps.cluster-jx4b7.dynamic.redhatworkshops.io
 ```
 
-> You will paste `$EDA_WEBHOOK_URL` as the Payload URL in GitHub Webhooks (Section 7).
+> If `oc get svc -n aap | grep eda-gitops-webhook` returns nothing, the activation
+> may still be starting. Wait 30 seconds and retry.
 
 ---
 
-## 6. Scenario A — Playbook & Job Template
+## 6. Scenario A — Job Template & SMTP Credential
 
-See `playbooks/apply-manifest.yml`.
+### Step 1 — Create SMTP Credential Type
 
-### Job Template Configuration
+In AAP: **Administration → Credential Types → Add**  
+Name: `SMTP (Notification)`
+
+**Input Configuration (YAML):**
+```yaml
+fields:
+  - id: smtp_host
+    type: string
+    label: SMTP Host
+  - id: smtp_port
+    type: string
+    label: SMTP Port
+  - id: smtp_user
+    type: string
+    label: SMTP Username
+  - id: smtp_pass
+    type: string
+    label: SMTP Password
+    secret: true
+required:
+  - smtp_host
+  - smtp_user
+  - smtp_pass
+```
+
+**Injector Configuration (YAML):**
+```yaml
+env:
+  SMTP_HOST: "{{ smtp_host }}"
+  SMTP_PORT: "{{ smtp_port }}"
+  SMTP_USER: "{{ smtp_user }}"
+  SMTP_PASS: "{{ smtp_pass }}"
+```
+
+### Step 2 — Create SMTP Credential
+
+In AAP: **Credentials → Add**, using type `SMTP (Notification)`.
+
+| Field | Value |
+|---|---|
+| Name | `smtp-notification` |
+| SMTP Host | your SMTP server (e.g. `smtp.gmail.com`) |
+| SMTP Port | `587` |
+| SMTP Username | your sender email address |
+| SMTP Password | your SMTP password or Gmail App Password |
+
+### Step 3 — Create Job Template
+
+In AAP: **Templates → Add → Job Template**
 
 | Field | Value |
 |---|---|
@@ -311,11 +387,11 @@ See `playbooks/apply-manifest.yml`.
 | Project | `aap-gitops-demo` |
 | Playbook | `playbooks/apply-manifest.yml` |
 | Inventory | `Demo Inventory` (playbook runs on localhost) |
-| Credentials | `ocp-demo-cluster` + SMTP credential |
+| Credentials | `ocp-demo-cluster` + `smtp-notification` |
 | Extra Variables: Prompt on Launch | **CHECKED** |
 
-> ⚠️ **"Prompt on Launch" for Extra Variables is mandatory.** Without it, EDA cannot
-> pass `repo_url`, `commit_sha`, and `changed_files` to the playbook at runtime.
+> ⚠️ **"Prompt on Launch" is mandatory.** Without it, EDA cannot pass `repo_url`,
+> `commit_sha`, and `changed_files` to the playbook at runtime.
 
 ---
 
@@ -327,17 +403,17 @@ In GitHub: **Repository → Settings → Webhooks → Add webhook**
 
 | Field | Value |
 |---|---|
-| Payload URL | run `echo $EDA_WEBHOOK_URL` and paste the output |
+| Payload URL | `echo $EDA_WEBHOOK_URL` → paste output |
 | Content type | `application/json` |
-| Secret | leave blank for demo |
+| Secret | leave blank for this demo |
 | Which events? | Just the **push** event |
 | Active | Checked |
 
-### Step 2 — Test with curl
+### Step 2 — Test the Webhook with curl
 
 ```bash
 # Uses $EDA_WEBHOOK_URL exported in Section 5
-curl -sk -X POST ${EDA_WEBHOOK_URL} \
+curl -sk -X POST "${EDA_WEBHOOK_URL}" \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: push" \
   -d '{
@@ -346,29 +422,41 @@ curl -sk -X POST ${EDA_WEBHOOK_URL} \
     "repository": {
       "clone_url": "https://github.com/tommeramber/aap-eda-gitops"
     },
-    "commits": [{
-      "modified": ["ocp/sa-and-crb.yaml"]
-    }]
+    "commits": [{"modified": ["ocp/sa-and-crb.yaml"]}]
   }'
+
+# Expected: empty response or {} — a connection error means the Route isn't ready
 ```
 
-### Step 3 — End-to-End Verification
+### Step 3 — End-to-End Smoke Test
 
 ```bash
 # 1. Edit any .yaml file in the repo and commit to main
-# 2. EDA UI: Rulebook Activations → gitops-scenario-a-direct → History
-#    Should fire within seconds
-# 3. AAP UI: Jobs → gitops-apply-networkpolicy should appear
-# 4. OCP: oc get networkpolicy -A  (modified policy should appear)
+# 2. Watch EDA: Rulebook Activations → gitops-scenario-a-direct → History
+#    Should show a new event within seconds
+# 3. Watch AAP: Jobs → gitops-apply-networkpolicy should appear
+# 4. Verify in OCP:
+oc get networkpolicy -A
 ```
 
 ---
 
 ## 8. Scenario B — AAP Workflow Template
 
-The workflow chains three nodes: send approval email → approval gate → apply + notify.
+### Step 1 — Create Job Template: gitops-send-approval-request
 
-### Create Workflow Template
+In AAP: **Templates → Add → Job Template**
+
+| Field | Value |
+|---|---|
+| Name | `gitops-send-approval-request` |
+| Project | `aap-gitops-demo` |
+| Playbook | `playbooks/send-approval-request.yml` |
+| Inventory | `Demo Inventory` |
+| Credentials | `ocp-demo-cluster` + `smtp-notification` |
+| Extra Variables: Prompt on Launch | **CHECKED** |
+
+### Step 2 — Create Workflow Template
 
 In AAP: **Templates → Add → Workflow Template**
 
@@ -378,7 +466,9 @@ In AAP: **Templates → Add → Workflow Template**
 | Organization | `Default` |
 | Extra Variables: Prompt on Launch | **CHECKED** |
 
-### Workflow Nodes (Workflow Visualizer)
+### Step 3 — Build Workflow Nodes (Workflow Visualizer)
+
+Open the Workflow Visualizer and add three connected nodes:
 
 | Node | Type | Name / Config | Connection |
 |---|---|---|---|
@@ -386,17 +476,9 @@ In AAP: **Templates → Add → Workflow Template**
 | Node 2 | Approval | `Approve GitOps Change` (timeout: 24h) | On Success from Node 1 |
 | Node 3 | Job Template | `gitops-apply-networkpolicy` | On Approval from Node 2 |
 
-### Job Template: gitops-send-approval-request
-
-| Field | Value |
-|---|---|
-| Playbook | `playbooks/send-approval-request.yml` |
-| Credentials | `ocp-demo-cluster` + SMTP credential |
-| Extra Variables: Prompt on Launch | **CHECKED** |
-
-> **Note on `tower_workflow_job_id`:** AAP automatically injects this variable inside
-> a Workflow. The playbook uses it to locate the pending approval node ID via the
-> REST API and embed it in the email so the microservice can approve the right node.
+> **How `tower_workflow_job_id` works:** AAP automatically injects this variable when
+> a job template runs inside a Workflow. The `send-approval-request` playbook uses it
+> to query the AAP API for the pending approval node ID and embed it in the email body.
 
 ---
 
@@ -404,91 +486,143 @@ In AAP: **Templates → Add → Workflow Template**
 
 See `playbooks/send-approval-request.yml`.
 
-Key behaviour: embeds `WFJ-<workflow_job_id>/<approval_node_id>` in the email body
-so the microservice can target the exact approval node when the approver replies.
+The playbook embeds `WFJ-<workflow_job_id>/<approval_node_id>` in the approval email.
+The email-approver microservice parses this tag to call the exact approval node on the
+AAP API — without it, the microservice falls back to approving all pending approvals.
 
 ---
 
-## 10. Email Approval Microservice (Python)
+## 10. Email Approval Microservice — Build & Push
 
 See `microservice/app.py`, `microservice/Dockerfile`, `microservice/requirements.txt`.
 
 ```bash
-# Build and push (replace YOUR_ORG with your Quay/registry org)
+# Build (replace YOUR_ORG with your Quay or internal registry org)
 podman build -t quay.io/YOUR_ORG/email-approver:latest microservice/
+
+# Verify the image starts without errors
+podman run --rm \
+  -e IMAP_HOST=test -e IMAP_USER=test -e IMAP_PASS=test \
+  -e AAP_BASE_URL=http://localhost -e AAP_TOKEN=test \
+  quay.io/YOUR_ORG/email-approver:latest \
+  python3 -c "import app; print('imports OK')" 2>&1 | head -5
+
+# Push
 podman login quay.io
 podman push quay.io/YOUR_ORG/email-approver:latest
 ```
 
 ---
 
-## 11. OCP Deployment for the Microservice
+## 11. Scenario B — OCP Deployment & Token
 
-### Step 1 — Fill in the Secret
+> This section is only needed for **Scenario B**. Complete Sections 1–7 and verify
+> Scenario A works before starting here.
+
+### Step 1 — Generate and Export the AAP Microservice Token
+
+This token allows the email-approver microservice to call the AAP approval API.
+It is created here — close to where it is used — not in Section 2.
+
+```bash
+# Step 1a: create the token and capture the full JSON response
+AAP_TOKEN_RESPONSE=$(curl -sk -X POST \
+  "${AAP_URL}/api/v2/tokens/" \
+  -H "Content-Type: application/json" \
+  -u "admin:${AAP_ADMIN_PASS}" \
+  -d '{"description": "email-approver-microservice", "scope": "write"}')
+
+# Step 1b: inspect the response — should show a JSON object with a "token" field
+echo "$AAP_TOKEN_RESPONSE" | python3 -m json.tool
+
+# Step 1c: extract and export the token value
+export AAP_MICROSERVICE_TOKEN=$(echo "$AAP_TOKEN_RESPONSE" | \
+  python3 -c "import sys, json; print(json.load(sys.stdin)['token'])")
+
+# Step 1d: verify it was captured (should print a non-empty string)
+echo "AAP_MICROSERVICE_TOKEN length: ${#AAP_MICROSERVICE_TOKEN}"
+```
+
+> If Step 1b shows `{"detail": "Authentication credentials were not provided."}`,
+> `$AAP_ADMIN_PASS` is not set. Re-run the export from the Lab Credentials section.
+>
+> If Step 1b shows `{"detail": "Invalid token."}` or a 401, check the password value:
+> ```bash
+> echo $AAP_ADMIN_PASS
+> ```
+
+### Step 2 — Fill In and Apply the OCP Secret
 
 ```bash
 cp ocp/email-approver-secret.example.yaml ocp/email-approver-secret.yaml
 ```
 
-Edit `ocp/email-approver-secret.yaml` and set the following values.
-Use `echo $VARIABLE` to retrieve any value generated earlier in this guide:
+Edit `ocp/email-approver-secret.yaml` and set:
 
-| Secret key | Value |
+| Key | Value |
 |---|---|
 | `IMAP_HOST` | your IMAP server (e.g. `imap.gmail.com`) |
 | `IMAP_USER` | the inbox address that receives approval replies |
 | `IMAP_PASS` | IMAP password or Gmail App Password |
-| `AAP_BASE_URL` | `https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io` |
-| `AAP_TOKEN` | run `echo $AAP_MICROSERVICE_TOKEN` and paste the output |
-| `AAP_VERIFY_SSL` | `false` |
-
-> ⚠️ `ocp/email-approver-secret.yaml` is in `.gitignore` — never commit it.
-
-### Step 2 — Deploy
+| `AAP_BASE_URL` | `echo $AAP_URL` → paste output |
+| `AAP_TOKEN` | `echo $AAP_MICROSERVICE_TOKEN` → paste output |
 
 ```bash
+# Apply (this file is in .gitignore — never commit it)
 oc apply -f ocp/email-approver-secret.yaml -n aap
+```
+
+### Step 3 — Deploy the Microservice
+
+Update `ocp/email-approver-deploy.yaml` with your actual image reference, then:
+
+```bash
 oc apply -f ocp/email-approver-deploy.yaml -n aap
 oc rollout status deployment/email-approver -n aap
+
+# Tail logs — should show "Email Approval Microservice starting"
 oc logs -f deployment/email-approver -n aap
 ```
 
 > ⚠️ The microservice needs outbound **TCP 993** to your IMAP server.
-> Verify OCP NetworkPolicies and egress rules in the `aap` namespace allow this.
+> If the pod logs show connection timeouts, verify OCP egress NetworkPolicies.
 
 ---
 
 ## 12. Demo Walkthrough Checklist
 
-### Pre-Demo — Session Variables Check
-
-Before anything else, confirm all variables are set in your terminal:
+### Pre-Demo — Confirm All Session Variables
 
 ```bash
-echo "AAP_ADMIN_PASS      = $AAP_ADMIN_PASS"
-echo "OCP_SA_TOKEN        = ${OCP_SA_TOKEN:0:40}..."
-echo "OCP_API_URL         = $OCP_API_URL"
-echo "AAP_MICROSERVICE_TOKEN = ${AAP_MICROSERVICE_TOKEN:0:20}..."
-echo "EDA_WEBHOOK_URL     = $EDA_WEBHOOK_URL"
+echo "AAP_URL               = $AAP_URL"
+echo "AAP_ADMIN_PASS        = ${AAP_ADMIN_PASS:0:6}... (len=${#AAP_ADMIN_PASS})"
+echo "OCP_SA_TOKEN          = ${OCP_SA_TOKEN:0:40}... (len=${#OCP_SA_TOKEN})"
+echo "OCP_API_URL           = $OCP_API_URL"
+echo "EDA_WEBHOOK_URL       = $EDA_WEBHOOK_URL"
+echo "AAP_MICROSERVICE_TOKEN= ${AAP_MICROSERVICE_TOKEN:0:20}... (len=${#AAP_MICROSERVICE_TOKEN})"
 ```
 
-### Pre-Demo — Infrastructure Check
+Any variable showing `len=0` needs to be re-exported before the demo.
+
+### Pre-Demo — Infrastructure Checklist
 
 | # | Task | Verify |
 |---|---|---|
 | 1 | OCP: `aap-gitops-sa` SA exists | `oc get sa aap-gitops-sa -n openshift-monitoring` |
-| 2 | AAP: Custom credential type `OCP Cluster (SA Token)` | AAP UI → Administration → Credential Types |
+| 2 | AAP: `OCP Cluster (SA Token)` credential type | AAP UI → Administration → Credential Types |
 | 3 | AAP: `ocp-demo-cluster` credential | AAP UI → Credentials |
-| 4 | AAP: `aap-gitops-demo` project synced | AAP UI → Projects → Status: Successful |
-| 5 | AAP: `gitops-apply-networkpolicy` job template | AAP UI → Templates |
-| 6 | AAP: `gitops-send-approval-request` job template | AAP UI → Templates |
-| 7 | AAP: `gitops-approval-workflow` workflow (3 nodes) | AAP UI → Templates → Visualizer |
-| 8 | EDA: `aap-controller-credential` exists | EDA UI → Credentials |
-| 9 | EDA: `gitops-scenario-a-direct` activation Running | EDA UI → Rulebook Activations |
-| 10 | OCP: EDA Route accessible | `curl -sk ${EDA_WEBHOOK_URL}` (no connection refused) |
-| 11 | GitHub: webhook last delivery = 200 | Repo → Settings → Webhooks |
-| 12 | **Scenario B only:** `email-approver` pod Running | `oc get pods -n aap \| grep email-approver` |
-| 13 | **Scenario B only:** microservice token valid | `oc logs deployment/email-approver -n aap` |
+| 4 | AAP: `smtp-notification` credential | AAP UI → Credentials |
+| 5 | AAP: `aap-gitops-demo` project synced | AAP UI → Projects → Status: Successful |
+| 6 | AAP: `gitops-apply-networkpolicy` job template | AAP UI → Templates |
+| 7 | EDA: `aap-controller-credential` exists | EDA UI → Credentials |
+| 8 | EDA: `gitops-scenario-a-direct` activation Running | EDA UI → Rulebook Activations |
+| 9 | OCP: EDA Route responds | `curl -sk -o /dev/null -w "%{http_code}" "${EDA_WEBHOOK_URL}"` (not 000) |
+| 10 | GitHub: webhook last delivery = 200 | Repo → Settings → Webhooks |
+| *(Scenario B only)* | | |
+| 11 | AAP: `gitops-send-approval-request` job template | AAP UI → Templates |
+| 12 | AAP: `gitops-approval-workflow` workflow (3 nodes) | AAP UI → Templates → Visualizer |
+| 13 | OCP: `email-approver` pod Running | `oc get pods -n aap \| grep email-approver` |
+| 14 | Microservice log shows "starting" | `oc logs deployment/email-approver -n aap \| head -5` |
 
 ---
 
@@ -499,9 +633,9 @@ echo "EDA_WEBHOOK_URL     = $EDA_WEBHOOK_URL"
 | 1 | Confirm `gitops-scenario-a-direct` activation is Running | EDA UI → Rulebook Activations |
 | 2 | Edit a NetworkPolicy YAML in the Git repo | GitHub browser UI |
 | 3 | Commit directly to main (or merge a PR) | GitHub commit confirmation |
-| 4 | Watch EDA activation history fire within seconds | EDA UI → History |
+| 4 | Watch EDA activation history fire within seconds | EDA UI → History tab |
 | 5 | Watch AAP job `gitops-apply-networkpolicy` start | AAP UI → Jobs → Running |
-| 6 | Show job output: git clone, then k8s apply task | Job details → Output tab |
+| 6 | Show job output: git clone step, then k8s apply step | Job details → Output tab |
 | 7 | Show the NetworkPolicy appeared in OCP | OCP → Networking → NetworkPolicies |
 | 8 | Show notification email received | Email inbox |
 
@@ -514,12 +648,12 @@ echo "EDA_WEBHOOK_URL     = $EDA_WEBHOOK_URL"
 | 1 | Deactivate `scenario-a`, activate `scenario-b-approval` | EDA UI → toggle activations |
 | 2 | Edit and push a NetworkPolicy YAML to main | GitHub UI |
 | 3 | Watch EDA fire → AAP Workflow starts | EDA + AAP UI side by side |
-| 4 | Show Workflow: Node 1 running (`send-approval-request`) | AAP Workflow Visualizer |
+| 4 | Show Workflow Visualizer: Node 1 running | AAP Workflow Visualizer |
 | 5 | Show approval request email in approver inbox | Email client |
-| 6 | Reply with single word: `approved` | Email client |
-| 7 | Show microservice log: `"Approved id=X HTTP 204"` | `oc logs -f deployment/email-approver -n aap` |
+| 6 | Reply with single word: `approved` | Email client reply |
+| 7 | Show microservice log: `Approved id=X HTTP 204` | `oc logs -f deployment/email-approver -n aap` |
 | 8 | Watch Approval node turn green, Node 3 start | AAP Workflow Visualizer |
-| 9 | Show NetworkPolicy applied in OCP + status email | OCP Console + email |
+| 9 | Show NetworkPolicy applied in OCP + status email sent | OCP Console + email |
 
 ---
 
@@ -528,12 +662,13 @@ echo "EDA_WEBHOOK_URL     = $EDA_WEBHOOK_URL"
 ```bash
 # List all pending approvals
 curl -sk \
-  "https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io/api/v2/workflow_approvals/?status=pending" \
-  -H "Authorization: Bearer ${AAP_MICROSERVICE_TOKEN}"
+  "${AAP_URL}/api/v2/workflow_approvals/?status=pending" \
+  -H "Authorization: Bearer ${AAP_MICROSERVICE_TOKEN}" \
+  | python3 -m json.tool
 
-# Approve a specific approval node (replace 42 with the real ID)
+# Approve a specific approval node (replace 42 with the real ID from the response above)
 curl -sk -X POST \
-  "https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io/api/v2/workflow_approvals/42/approve/" \
+  "${AAP_URL}/api/v2/workflow_approvals/42/approve/" \
   -H "Authorization: Bearer ${AAP_MICROSERVICE_TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{}'
