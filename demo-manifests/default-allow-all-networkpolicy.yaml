@@ -13,6 +13,3 @@ spec:
     - {}
   policyTypes:
     - Ingress
-    - Egress
-# trigger-test-9
-# trigger-1779112356
