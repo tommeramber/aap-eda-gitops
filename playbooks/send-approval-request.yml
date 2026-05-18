@@ -11,18 +11,23 @@
 # that the SMTP microservice uses to target the correct approval when
 # the approver replies with the word "approved".
 #
-# Required extra_vars (set "Prompt on Launch" in the Job Template):
+# Authentication against the AAP API uses TOWER_HOST and TOWER_AUTH_TOKEN —
+# two variables AAP automatically injects into every job execution environment.
+# No custom credential or extra_var is needed for the API call.
+#
+# Required extra_vars (set in Job Template + Prompt on Launch):
 #   repo_url        - Git clone URL
 #   commit_sha      - Full commit SHA
 #   changed_files   - List of changed file paths
-#   approver_email  - Email address to send the approval request to
+#   approver_email  - Email address that receives the approval request
 #
-# Required credentials / env vars:
-#   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS  — for sending email
-#   AAP_TOKEN  — AAP bearer token (needed to query workflow node IDs)
+# Required credential (injected as env vars via SMTP credential type):
+#   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS
 #
-# AAP magic variable automatically injected inside a Workflow:
-#   tower_workflow_job_id  — used to find the approval node via REST API
+# AAP magic variables automatically injected inside a Workflow:
+#   tower_workflow_job_id  — ID of the running workflow job
+#   TOWER_HOST             — AAP Controller URL (auto-injected by AAP)
+#   TOWER_AUTH_TOKEN       — Valid bearer token for this job (auto-injected by AAP)
 
 - name: Send email approval request for pending GitOps change
   hosts: localhost
@@ -32,23 +37,29 @@
     commit_sha: ""
     changed_files: []
     approver_email: "approver@example.com"
-    # Set this in the Job Template Extra Variables (not via env — it's an Ansible var):
-    #   aap_base_url: "https://<your-controller-route>"
-    # Retrieve the value with: echo $AAP_CONTROLLER_URL
-    aap_base_url: ""
 
   tasks:
 
-    - name: Capture workflow job ID from AAP magic variable
+    - name: Capture workflow job ID and AAP connection from auto-injected variables
       ansible.builtin.set_fact:
         workflow_job_id: "{{ tower_workflow_job_id }}"
+        aap_base_url: "{{ lookup('env', 'TOWER_HOST') }}"
+        aap_token: "{{ lookup('env', 'TOWER_AUTH_TOKEN') }}"
+
+    - name: Fail if AAP auto-injected variables are missing
+      ansible.builtin.fail:
+        msg: >
+          TOWER_HOST or TOWER_AUTH_TOKEN is not set.
+          These are auto-injected by AAP when a job runs inside a Workflow.
+          Ensure this Job Template is used as a Workflow node, not run standalone.
+      when: aap_base_url == '' or aap_token == ''
 
     - name: Query AAP for workflow nodes to find the pending approval ID
       ansible.builtin.uri:
         url: "{{ aap_base_url }}/api/v2/workflow_jobs/{{ workflow_job_id }}/workflow_nodes/"
         method: GET
         headers:
-          Authorization: "Bearer {{ lookup('env', 'AAP_TOKEN') }}"
+          Authorization: "Bearer {{ aap_token }}"
         validate_certs: false
         status_code: 200
       register: wf_nodes

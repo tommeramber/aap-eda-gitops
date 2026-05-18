@@ -565,17 +565,11 @@ In AAP: **Templates → Add → Job Template**
 | Playbook | `playbooks/send-approval-request.yml` |
 | Inventory | `Demo Inventory` |
 | Credentials | `ocp-demo-cluster` + `smtp-approval` |
-| Extra Variables | see below |
 | Extra Variables: Prompt on Launch | **CHECKED** |
 
-Add the following static extra variable — paste the value of `echo $AAP_CONTROLLER_URL`:
-
-```yaml
-aap_base_url: "https://<paste-echo-AAP_CONTROLLER_URL-here>"
-```
-
-> `aap_base_url` is a plain Ansible variable — it must be set here as an extra_var.
-> Do **not** use `lookup('env', ...)` — env vars from your terminal do not exist inside the playbook execution container.
+> No `aap_base_url` or token extra_var needed. AAP automatically injects `TOWER_HOST`
+> and `TOWER_AUTH_TOKEN` into every job execution environment. The playbook uses these
+> directly — no credentials or extra_vars required for the API call.
 
 ### Step 4 — Create Workflow Template
 
