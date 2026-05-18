@@ -3,19 +3,14 @@
 #
 # Node 1 in the Scenario B Approval Workflow.
 #
-# Queries the AAP REST API to find the pending approval node ID for
-# the current workflow job, then sends an approval request email to
-# the configured approver address.
+# Sends an approval request email to the configured approver address.
+# The email body embeds the workflow job ID so the microservice can
+# identify which workflow to approve when it detects an "approved" reply.
 #
-# The email body embeds a reference tag (WFJ-<wfj_id>/<approval_node_id>)
-# that the SMTP microservice uses to target the correct approval when
-# the approver replies with the word "approved".
+# The microservice will approve all pending workflow approvals when it
+# detects the keyword — safe for demos where only one approval runs at a time.
 #
-# Authentication against the AAP API uses TOWER_HOST and TOWER_AUTH_TOKEN —
-# two variables AAP automatically injects into every job execution environment.
-# No custom credential or extra_var is needed for the API call.
-#
-# Required extra_vars (set in Job Template + Prompt on Launch):
+# Required extra_vars (set "Prompt on Launch" in the Job Template):
 #   repo_url        - Git clone URL
 #   commit_sha      - Full commit SHA
 #   changed_files   - List of changed file paths
@@ -24,10 +19,8 @@
 # Required credential (injected as env vars via SMTP credential type):
 #   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS
 #
-# AAP magic variables automatically injected inside a Workflow:
+# AAP magic variable automatically injected inside a Workflow:
 #   tower_workflow_job_id  — ID of the running workflow job
-#   TOWER_HOST             — AAP Controller URL (auto-injected by AAP)
-#   TOWER_AUTH_TOKEN       — Valid bearer token for this job (auto-injected by AAP)
 
 - name: Send email approval request for pending GitOps change
   hosts: localhost
@@ -40,40 +33,9 @@
 
   tasks:
 
-    - name: Capture workflow job ID and AAP connection from auto-injected variables
+    - name: Capture workflow job ID from AAP magic variable
       ansible.builtin.set_fact:
         workflow_job_id: "{{ tower_workflow_job_id }}"
-        aap_base_url: "{{ lookup('env', 'TOWER_HOST') }}"
-        aap_token: "{{ lookup('env', 'TOWER_AUTH_TOKEN') }}"
-
-    - name: Fail if AAP auto-injected variables are missing
-      ansible.builtin.fail:
-        msg: >
-          TOWER_HOST or TOWER_AUTH_TOKEN is not set.
-          These are auto-injected by AAP when a job runs inside a Workflow.
-          Ensure this Job Template is used as a Workflow node, not run standalone.
-      when: aap_base_url == '' or aap_token == ''
-
-    - name: Query AAP for workflow nodes to find the pending approval ID
-      ansible.builtin.uri:
-        url: "{{ aap_base_url }}/api/v2/workflow_jobs/{{ workflow_job_id }}/workflow_nodes/"
-        method: GET
-        headers:
-          Authorization: "Bearer {{ aap_token }}"
-        validate_certs: false
-        status_code: 200
-      register: wf_nodes
-      until: wf_nodes.status == 200
-      retries: 10
-      delay: 3
-
-    - name: Extract the pending approval node ID
-      ansible.builtin.set_fact:
-        approval_node_id: >-
-          {{ (wf_nodes.json.results
-              | selectattr('type', 'equalto', 'WorkflowApproval')
-              | selectattr('status', 'equalto', 'pending')
-              | list | first).id | default('unknown') }}
 
     - name: Send approval request email to approver
       community.general.mail:
@@ -101,8 +63,8 @@
             approved
 
           ────────────────────────────────────────────────────
-          Approval Reference: WFJ-{{ workflow_job_id }}/{{ approval_node_id }}
+          Workflow Reference: WFJ-{{ workflow_job_id }}
           (The automated approval microservice running on OCP will
-          detect your reply and trigger the workflow to continue.)
+          detect your reply and approve the workflow continuation.)
 
           This approval request expires in 24 hours.
