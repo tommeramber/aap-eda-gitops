@@ -780,19 +780,70 @@ Any variable showing `len=0` needs to be re-exported before the demo.
 
 ---
 
+### Scenario B — How to Trigger and Run
+
+**Before you start:** confirm the microservice is running and the Scenario B activation is up:
+```bash
+# 1. Switch EDA activations
+#    EDA UI → Rulebook Activations → gitops-scenario-a-direct → Stop
+#    EDA UI → Rulebook Activations → gitops-scenario-b-approval → Start
+#    Wait for status: Running
+
+# 2. Confirm microservice is healthy
+oc logs deployment/email-approver -n aap | tail -5
+# Should show: "Pending approvals: 0" or "starting" — no errors
+
+# 3. Trigger the workflow by pushing a YAML change to main
+#    Either edit demo-manifests/default-allow-all-networkpolicy.yaml on GitHub,
+#    or run from your terminal:
+git clone https://github.com/tommeramber/aap-eda-gitops /tmp/aap-trigger 2>/dev/null || \
+  git -C /tmp/aap-trigger pull
+echo "# trigger-$(date +%s)" >> /tmp/aap-trigger/demo-manifests/default-allow-all-networkpolicy.yaml
+git -C /tmp/aap-trigger add -A
+git -C /tmp/aap-trigger commit -m "demo: trigger Scenario B approval workflow"
+git -C /tmp/aap-trigger push
+```
+
+**What happens next (automatic):**
+1. GitHub webhook fires → EDA `gitops-scenario-b-approval` receives it
+2. EDA triggers `gitops-approval-workflow` in AAP
+3. Workflow Node 1 runs `gitops-send-approval-request` — sends approval request email
+4. Workflow **pauses** at Node 2 (Approval gate) — waiting for human approval
+
+**To approve:**
+```bash
+# Option A — reply to the email (triggers the microservice automatically)
+# Open the approval request email → reply with exactly:   approved
+
+# Option B — approve manually via AAP API (for demo/testing without email)
+curl -sk \
+  "${AAP_CONTROLLER_URL}/api/v2/workflow_approvals/?status=pending" \
+  -H "Authorization: Bearer ${AAP_MICROSERVICE_TOKEN}" \
+  | python3 -m json.tool
+# Find the approval ID, then:
+curl -sk -X POST \
+  "${AAP_CONTROLLER_URL}/api/v2/workflow_approvals/<ID>/approve/" \
+  -H "Authorization: Bearer ${AAP_MICROSERVICE_TOKEN}" \
+  -H "Content-Type: application/json" -d '{}'
+```
+
+**After approval:**
+- Workflow Node 3 runs `gitops-apply-networkpolicy` — applies the YAML to OCP
+- Verify: `oc get networkpolicy -A`
+
 ### Scenario B — Live Demo Steps
 
 | Step | Action | Show the Audience |
 |---|---|---|
 | 1 | Stop `gitops-scenario-a-direct` → Start `gitops-scenario-b-approval` | EDA UI → Rulebook Activations |
-| 2 | Edit and push a NetworkPolicy YAML to main | GitHub UI |
+| 2 | Edit and push `demo-manifests/default-allow-all-networkpolicy.yaml` to main | GitHub browser UI |
 | 3 | Watch EDA fire → AAP Workflow starts | EDA + AAP UI side by side |
-| 4 | Show Workflow Visualizer: Node 1 running | AAP Workflow Visualizer |
+| 4 | Show Workflow Visualizer: Node 1 running, then paused at Node 2 | AAP Workflow Visualizer |
 | 5 | Show approval request email in approver inbox | Email client |
 | 6 | Reply with single word: `approved` | Email client reply |
 | 7 | Show microservice log: `Approved id=X HTTP 204` | `oc logs -f deployment/email-approver -n aap` |
 | 8 | Watch Approval node turn green, Node 3 start | AAP Workflow Visualizer |
-| 9 | Show NetworkPolicy applied in OCP + status email sent | OCP Console + email |
+| 9 | Show NetworkPolicy applied in OCP | `oc get networkpolicy -A` |
 
 ---
 
