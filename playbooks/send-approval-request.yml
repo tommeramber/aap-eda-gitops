@@ -7,11 +7,15 @@
 # and sends an approval request email with the full file contents embedded
 # so the approver can see exactly what change they are approving.
 #
-# Required extra_vars (set "Prompt on Launch" in the Job Template):
+# Required extra_vars (set in Job Template Extra Variables):
 #   repo_url        - Git clone URL
 #   commit_sha      - Full commit SHA
-#   changed_files   - List of changed file paths
-#   approver_email  - Email address that receives the approval request
+#   changed_files   - List of changed file paths (passed by EDA via Prompt on Launch)
+#   approver_email  - Address that RECEIVES the approval request (e.g. tommeramber@gmail.com)
+#   reply_to_email  - Address replies are SENT TO — must be the microservice's inbox
+#                     (e.g. AAP-DEMO@gmail.com). The microservice monitors this inbox.
+#                     Gmail SMTP sends FROM the authenticated account; Reply-To routes
+#                     the approver's reply to the microservice's monitored inbox.
 #
 # Required credential (injected as env vars via SMTP credential type):
 #   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS
@@ -27,6 +31,7 @@
     commit_sha: ""
     changed_files: []
     approver_email: "approver@example.com"
+    reply_to_email: ""   # set in Job Template extra_vars: the microservice's inbox address
 
   tasks:
 
@@ -94,3 +99,7 @@
         to: "{{ approver_email }}"
         subject: "[GitOps APPROVAL REQUIRED] {{ commit_sha[:8] }} — {{ yaml_files | join(', ') }}"
         body: "{{ email_body }}"
+        # Reply-To routes the approver's reply to the microservice's monitored inbox,
+        # even though Gmail sends FROM the authenticated SMTP account.
+        headers:
+          - "Reply-To: {{ reply_to_email }}"
