@@ -1,0 +1,53 @@
+---
+# OCP Deployment — Email Approval Microservice
+#
+# Deploys the email-approver container that polls an IMAP mailbox and
+# calls the AAP REST API to approve pending workflow approvals.
+#
+# Prerequisites:
+#   - email-approver-secret must exist in the aap namespace
+#   - Container image must be built and pushed (see microservice/Dockerfile)
+#
+# Apply with:
+#   oc apply -f ocp/email-approver-deploy.yaml -n aap
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: email-approver
+  namespace: aap
+  labels:
+    app: email-approver
+    version: "1.0.0"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: email-approver
+  template:
+    metadata:
+      labels:
+        app: email-approver
+    spec:
+      containers:
+        - name: email-approver
+          image: quay.io/YOUR_ORG/email-approver:latest
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: email-approver-secret
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL

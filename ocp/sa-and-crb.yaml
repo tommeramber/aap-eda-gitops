@@ -1,0 +1,39 @@
+---
+# OCP ServiceAccount and ClusterRoleBinding for AAP GitOps
+#
+# Creates a ServiceAccount in openshift-monitoring that AAP uses to
+# authenticate against the OCP API. The ClusterRoleBinding grants
+# cluster-admin so AAP can apply manifests cluster-wide.
+#
+# Apply with:
+#   oc apply -f ocp/sa-and-crb.yaml
+#
+# Generate a long-lived token:
+#   oc create token aap-gitops-sa -n openshift-monitoring --duration=8760h
+#
+# Store the token in the AAP custom credential "ocp-demo-cluster".
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aap-gitops-sa
+  namespace: openshift-monitoring
+  labels:
+    app: aap-gitops
+    managed-by: aap
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aap-gitops-sa-cluster-admin
+  labels:
+    app: aap-gitops
+    managed-by: aap
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: aap-gitops-sa
+    namespace: openshift-monitoring

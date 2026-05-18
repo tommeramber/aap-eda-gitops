@@ -1,0 +1,48 @@
+---
+# Scenario B — Approval Gate GitOps
+#
+# Listens for GitHub push events on the main branch.
+# On every push, triggers the AAP *workflow* template that:
+#   1. Sends an approval request email to the approver
+#   2. Waits at an approval node
+#   3. After approval, applies changed YAML manifests to OCP
+#
+# The approver replies "approved" to the email.
+# The SMTP microservice running on OCP detects the reply and
+# calls the AAP REST API to approve the workflow continuation.
+#
+# Activate this rulebook in EDA UI with:
+#   Service Name: eda-gitops-webhook
+#   AAP Controller Credential: aap-controller-credential
+#
+# NOTE: Only one rulebook activation should be running at a time.
+#       Deactivate scenario-a-direct before activating this one.
+
+- name: GitOps Approval Workflow — listen for GitHub push events
+  hosts: all
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    - name: Trigger approval workflow on push to main
+      condition: >
+        event.payload.ref is defined and
+        event.payload.ref == "refs/heads/main" and
+        event.payload.commits is defined
+
+      action:
+        run_workflow_template:
+          name: "gitops-approval-workflow"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              repo_url: "{{ event.payload.repository.clone_url }}"
+              commit_sha: "{{ event.payload.after }}"
+              changed_files: >-
+                {{ event.payload.commits
+                   | map(attribute='modified') | flatten
+                   | select('match', '.*\.ya?ml$') | list }}
+              repo_ref: "{{ event.payload.after }}"
+              approver_email: "approver@example.com"

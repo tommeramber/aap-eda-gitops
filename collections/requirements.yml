@@ -1,0 +1,22 @@
+---
+# Ansible collection requirements
+# Install with: ansible-galaxy collection install -r collections/requirements.yml
+# Or reference this file in your AAP project for automatic installation.
+
+collections:
+  # Kubernetes / OpenShift — apply manifests, manage OCP resources
+  # kubernetes.core covers everything needed: k8s, openshift_route, etc.
+  - name: kubernetes.core
+    version: ">=2.4.0"
+
+  # Community General — email, Slack, syslog notifications
+  - name: community.general
+    version: ">=8.0.0"
+
+  # Event-Driven Ansible — EDA event source plugins (webhook listener)
+  - name: ansible.eda
+    version: ">=1.4.0"
+
+  # NOTE: redhat.openshift is a Red Hat certified collection available only
+  # from Automation Hub (requires RH subscription). It is NOT needed for this
+  # demo — kubernetes.core.k8s handles all OCP manifest operations.

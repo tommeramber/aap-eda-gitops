@@ -1,0 +1,94 @@
+---
+# send-approval-request.yml
+#
+# Node 1 in the Scenario B Approval Workflow.
+#
+# Queries the AAP REST API to find the pending approval node ID for
+# the current workflow job, then sends an approval request email to
+# the configured approver address.
+#
+# The email body embeds a reference tag (WFJ-<wfj_id>/<approval_node_id>)
+# that the SMTP microservice uses to target the correct approval when
+# the approver replies with the word "approved".
+#
+# Required extra_vars (set "Prompt on Launch" in the Job Template):
+#   repo_url        - Git clone URL
+#   commit_sha      - Full commit SHA
+#   changed_files   - List of changed file paths
+#   approver_email  - Email address to send the approval request to
+#
+# Required credentials / env vars:
+#   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS  — for sending email
+#   AAP_TOKEN  — AAP bearer token (needed to query workflow node IDs)
+#
+# AAP magic variable automatically injected inside a Workflow:
+#   tower_workflow_job_id  — used to find the approval node via REST API
+
+- name: Send email approval request for pending GitOps change
+  hosts: localhost
+  gather_facts: false
+  vars:
+    repo_url: ""
+    commit_sha: ""
+    changed_files: []
+    approver_email: "approver@example.com"
+    aap_base_url: "https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io"
+
+  tasks:
+
+    - name: Capture workflow job ID from AAP magic variable
+      ansible.builtin.set_fact:
+        workflow_job_id: "{{ tower_workflow_job_id }}"
+
+    - name: Query AAP for workflow nodes to find the pending approval ID
+      ansible.builtin.uri:
+        url: "{{ aap_base_url }}/api/v2/workflow_jobs/{{ workflow_job_id }}/workflow_nodes/"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ lookup('env', 'AAP_TOKEN') }}"
+        validate_certs: false
+        status_code: 200
+      register: wf_nodes
+      until: wf_nodes.status == 200
+      retries: 10
+      delay: 3
+
+    - name: Extract the pending approval node ID
+      ansible.builtin.set_fact:
+        approval_node_id: >-
+          {{ (wf_nodes.json.results
+              | selectattr('type', 'equalto', 'WorkflowApproval')
+              | selectattr('status', 'equalto', 'pending')
+              | list | first).id | default('unknown') }}
+
+    - name: Send approval request email to approver
+      community.general.mail:
+        host: "{{ lookup('env', 'SMTP_HOST') | default('smtp.gmail.com') }}"
+        port: "{{ lookup('env', 'SMTP_PORT') | default('587') | int }}"
+        username: "{{ lookup('env', 'SMTP_USER') }}"
+        password: "{{ lookup('env', 'SMTP_PASS') }}"
+        to: "{{ approver_email }}"
+        subject: "[GitOps APPROVAL REQUIRED] {{ commit_sha[:8] }}"
+        body: |
+          A GitOps change requires your approval before it is applied to the OCP cluster.
+
+          Repository : {{ repo_url }}
+          Commit     : {{ commit_sha }}
+
+          Changed manifests:
+          {% for f in changed_files %}
+            - {{ f }}
+          {% endfor %}
+
+          ────────────────────────────────────────────────────
+          To APPROVE this change, reply to this email with the
+          single word (nothing else in the body):
+
+            approved
+
+          ────────────────────────────────────────────────────
+          Approval Reference: WFJ-{{ workflow_job_id }}/{{ approval_node_id }}
+          (The automated approval microservice running on OCP will
+          detect your reply and trigger the workflow to continue.)
+
+          This approval request expires in 24 hours.

@@ -1,0 +1,34 @@
+---
+# OCP Route — Exposes the EDA webhook listener externally
+#
+# After the EDA Rulebook Activation is running with Service Name "eda-gitops-webhook",
+# AAP creates a Service named "eda-gitops-webhook" in the "aap" namespace.
+# This Route exposes that service so GitHub (or any external system) can
+# send webhook events to EDA.
+#
+# Apply with:
+#   oc apply -f ocp/eda-webhook-route.yaml
+#
+# Get the final URL:
+#   oc get route eda-gitops-webhook -n aap -o jsonpath='{.spec.host}'
+
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: eda-gitops-webhook
+  namespace: aap
+  labels:
+    app: eda-gitops
+    managed-by: eda
+spec:
+  host: eda-webhook.apps.cluster-jx4b7.dynamic.redhatworkshops.io
+  port:
+    targetPort: eda-gitops-webhook-5000
+  to:
+    kind: Service
+    name: eda-gitops-webhook
+    weight: 100
+  wildcardPolicy: None
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

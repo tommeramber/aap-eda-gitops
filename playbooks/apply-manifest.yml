@@ -1,0 +1,94 @@
+---
+# apply-manifest.yml
+#
+# Clones the Git repository at the pushed commit SHA, filters the
+# changed files for YAML manifests, applies each one to OCP using
+# the kubernetes.core.k8s module, and sends an email notification.
+#
+# Used by:
+#   - Scenario A: as the single Job Template
+#   - Scenario B: as Node 3 in the Approval Workflow (after approval)
+#
+# Required extra_vars (set "Prompt on Launch" in the Job Template):
+#   repo_url      - Git clone URL
+#   commit_sha    - Full commit SHA
+#   changed_files - List of changed file paths (filtered to *.yaml / *.yml)
+#   repo_ref      - Git ref to checkout (defaults to commit_sha)
+#
+# Required credentials (injected as env vars via custom credential type):
+#   OCP_API_URL   - OCP API server URL
+#   OCP_TOKEN     - ServiceAccount bearer token
+#   SMTP_HOST     - SMTP server hostname
+#   SMTP_PORT     - SMTP server port (default: 587)
+#   SMTP_USER     - SMTP username
+#   SMTP_PASS     - SMTP password
+
+- name: Apply changed YAML manifests from Git to OCP
+  hosts: localhost
+  gather_facts: false
+  vars:
+    repo_url: ""
+    commit_sha: ""
+    changed_files: []
+    repo_ref: ""
+    notification_email: "ops-team@example.com"
+
+  tasks:
+
+    - name: Resolve OCP connection from injected credential env vars
+      ansible.builtin.set_fact:
+        ocp_api: "{{ lookup('env', 'OCP_API_URL') }}"
+        ocp_token: "{{ lookup('env', 'OCP_TOKEN') }}"
+
+    - name: Fail fast if OCP credentials were not injected
+      ansible.builtin.fail:
+        msg: "OCP_API_URL or OCP_TOKEN is not set. Check the Job Template credential."
+      when: ocp_api == '' or ocp_token == ''
+
+    - name: Clone repository at the pushed commit SHA
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: /tmp/gitops-repo
+        version: "{{ repo_ref | default(commit_sha) }}"
+        force: true
+      no_log: true
+
+    - name: Filter changed_files for YAML manifests only
+      ansible.builtin.set_fact:
+        yaml_files: "{{ changed_files | select('match', '.*\\.ya?ml$') | list }}"
+
+    - name: End play gracefully if no YAML files changed
+      ansible.builtin.meta: end_play
+      when: yaml_files | length == 0
+
+    - name: Apply each changed YAML manifest to OCP
+      kubernetes.core.k8s:
+        host: "{{ ocp_api }}"
+        api_key: "{{ ocp_token }}"
+        validate_certs: false
+        state: present
+        src: "/tmp/gitops-repo/{{ item }}"
+      loop: "{{ yaml_files }}"
+      register: apply_result
+
+    - name: Send success notification email
+      community.general.mail:
+        host: "{{ lookup('env', 'SMTP_HOST') | default('smtp.gmail.com') }}"
+        port: "{{ lookup('env', 'SMTP_PORT') | default('587') | int }}"
+        username: "{{ lookup('env', 'SMTP_USER') }}"
+        password: "{{ lookup('env', 'SMTP_PASS') }}"
+        to: "{{ notification_email }}"
+        subject: >-
+          [GitOps SUCCESS] {{ yaml_files | length }} manifest(s) applied
+          from {{ commit_sha[:8] }}
+        body: |
+          GitOps automation completed successfully.
+
+          Repository : {{ repo_url }}
+          Commit     : {{ commit_sha }}
+          Applied    :
+          {% for f in yaml_files %}
+            - {{ f }}
+          {% endfor %}
+      when: apply_result is not failed
+      ignore_errors: true
