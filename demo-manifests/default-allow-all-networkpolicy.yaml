@@ -11,4 +11,4 @@ spec:
     - {}
   policyTypes:
     - Ingress
-    #- Egressttt
+    - Egress
