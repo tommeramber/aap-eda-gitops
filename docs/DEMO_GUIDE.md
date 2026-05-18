@@ -582,25 +582,26 @@ In AAP: **Templates → Add → Workflow Template**
 | Extra Variables | see below |
 | Extra Variables: Prompt on Launch | **CHECKED** |
 
-Set the following static extra variables in the Workflow Template:
+Set the following static extra variable in the Workflow Template:
 
 ```yaml
-approver_email: "tommeramber@gmail.com"    # address that RECEIVES the approval request
-reply_to_email: "AAP-DEMO@gmail.com"       # address replies are ROUTED TO (microservice inbox)
+approver_email: "example@example.com"   # address that receives the approval request
 ```
 
 > **How the email loop works:**
 >
 > | | Address | Role |
 > |---|---|---|
-> | SMTP auth (`smtp-approval` credential) | `tommeramber@gmail.com` | Gmail requires sending FROM the authenticated account |
-> | `approver_email` | `tommeramber@gmail.com` | Receives the approval request |
-> | `reply_to_email` | `AAP-DEMO@gmail.com` | Reply-To header — approver's reply is routed here |
-> | `IMAP_USER` (OCP Secret) | `AAP-DEMO@gmail.com` | Microservice polls this inbox |
+> | SMTP auth (`smtp-approval` credential) | your Gmail | Sends the approval request email |
+> | `approver_email` | your Gmail | Receives the approval request |
+> | `IMAP_USER` (OCP Secret) | your Gmail | Microservice polls **the same inbox** for the reply |
 >
-> Gmail sends FROM `tommeramber@gmail.com` but the **Reply-To** header points to `AAP-DEMO@gmail.com`.
-> When you click Reply, your mail client uses Reply-To — so the reply lands in `AAP-DEMO@gmail.com`.
-> No second SMTP account needed.
+> The email is sent FROM and TO your own Gmail account.
+> The microservice monitors your Gmail inbox via IMAP:
+> - Finds the original approval email → no "approved" in body → marks read, skips
+> - You reply "approved" → reply lands in your inbox → microservice detects it → approves workflow
+>
+> One Gmail account, one App Password — used for both SMTP (sending) and IMAP (monitoring).
 
 ### Step 5 — Build Workflow Nodes (Workflow Visualizer)
 
