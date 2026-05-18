@@ -14,8 +14,8 @@ setup. All later commands reference these variables — if you open a new termin
 |---|---|---|
 | `AAP_URL` | Lab Credentials | AAP UI login, REST API calls from terminal, OCP Secret `AAP_BASE_URL` |
 | `AAP_CONTROLLER_URL` | Lab Credentials | EDA `aap-controller-credential` URL only — see note below |
-| `AAP_EDA_TOKEN` | Lab Credentials | EDA `aap-controller-credential` token field |
-| `AAP_ADMIN_PASS` | Lab Credentials | Token generation (Section 11) |
+| `AAP_CONTROLLER_PASS` | Lab Credentials | EDA `aap-controller-credential` password field |
+| `AAP_ADMIN_PASS` | Lab Credentials | AAP UI login, token generation (Section 11) |
 | `OCP_SA_TOKEN` | Section 1 Step 2 | AAP OCP credential (Section 2) |
 | `OCP_API_URL` | Section 1 Step 3 | AAP OCP credential (Section 2) |
 | `EDA_WEBHOOK_URL` | Section 5 Step 4 | GitHub webhook config (Section 7), curl test |
@@ -62,22 +62,26 @@ curl -sk -o /dev/null -w "Controller /api/v2/config/ → HTTP %{http_code}\n" \
 > export AAP_CONTROLLER_URL="https://<that-host>"
 > ```
 
-### Export the AAP EDA Token
+### Export the AAP Controller password
 
-In AAP 2.6, the Automation Controller authenticates via the Platform Gateway's OAuth.
-Basic `admin:password` auth on the controller route returns 401. The EDA credential
-must use an **API token** instead.
+In AAP 2.6, the Platform Gateway and the Automation Controller each have their own
+admin password stored in separate OCP Secrets. The EDA credential must use the
+**Controller's** password (`demo-aap-controller-admin-password`), not the gateway's.
 
-Create the token in the **AAP UI** first:
-1. Top-right avatar → **Users → admin → Tokens** tab → **Add**
-2. Description: `eda-controller-token` | Scope: **Write** → Save
-3. **Copy the token immediately** — it is shown only once
-
-Then export it:
 ```bash
-export AAP_EDA_TOKEN="<paste-token-here>"
-echo "AAP_EDA_TOKEN length: ${#AAP_EDA_TOKEN}"
+export AAP_CONTROLLER_PASS=$(oc get secret demo-aap-controller-admin-password \
+  -n aap \
+  -o jsonpath='{.data.password}' | base64 -d)
+
+# Verify (should print a non-empty string)
+echo "AAP_CONTROLLER_PASS length: ${#AAP_CONTROLLER_PASS}"
 ```
+
+> If the secret name differs, list all password secrets to find the right one:
+> ```bash
+> oc get secrets -n aap | grep -i password
+> # Look for the one containing 'controller'
+> ```
 
 ### Export the AAP admin password
 
@@ -309,7 +313,8 @@ In EDA UI: **Credentials → Create**
 | Name | `aap-controller-credential` |
 | Credential Type | `Red Hat Ansible Automation Platform` |
 | URL | `echo $AAP_CONTROLLER_URL` → paste output |
-| Token | `echo $AAP_EDA_TOKEN` → paste output |
+| Username | `admin` |
+| Password | `echo $AAP_CONTROLLER_PASS` → paste output |
 | SSL Verify | `False` (self-signed cert in this lab) |
 
 > ⚠️ **Two common mistakes that cause activation failures:**
@@ -317,7 +322,7 @@ In EDA UI: **Credentials → Create**
 > | Symptom | Cause | Fix |
 > |---|---|---|
 > | `404 Not Found /api/v2/config/` | URL points to Platform Gateway (`demo-aap-aap`) | Use `$AAP_CONTROLLER_URL` (`demo-aap-controller-aap`) |
-> | `401 Unauthorized /api/v2/config/` | Using username/password instead of token | Use Token field with `$AAP_EDA_TOKEN` |
+> | `401 Unauthorized /api/v2/config/` | Using the gateway password (`demo-aap-admin-password`) | Use `$AAP_CONTROLLER_PASS` from `demo-aap-controller-admin-password` |
 
 ### Step 2 — Create EDA Project
 
@@ -711,7 +716,7 @@ oc logs -f deployment/email-approver -n aap
 ```bash
 echo "AAP_URL               = $AAP_URL"
 echo "AAP_CONTROLLER_URL    = $AAP_CONTROLLER_URL"
-echo "AAP_EDA_TOKEN         = ${AAP_EDA_TOKEN:0:20}... (len=${#AAP_EDA_TOKEN})"
+echo "AAP_CONTROLLER_PASS   = ${AAP_CONTROLLER_PASS:0:6}... (len=${#AAP_CONTROLLER_PASS})"
 echo "AAP_ADMIN_PASS        = ${AAP_ADMIN_PASS:0:6}... (len=${#AAP_ADMIN_PASS})"
 echo "OCP_SA_TOKEN          = ${OCP_SA_TOKEN:0:40}... (len=${#OCP_SA_TOKEN})"
 echo "OCP_API_URL           = $OCP_API_URL"
