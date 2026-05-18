@@ -478,6 +478,7 @@ In GitHub: **Repository → Settings → Webhooks → Add webhook**
 
 ```bash
 # Uses $EDA_WEBHOOK_URL exported in Section 5
+# -o /dev/null suppresses the empty body; -w prints the HTTP status code
 curl -sk -X POST "${EDA_WEBHOOK_URL}" \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: push" \
@@ -488,10 +489,15 @@ curl -sk -X POST "${EDA_WEBHOOK_URL}" \
       "clone_url": "https://github.com/tommeramber/aap-eda-gitops"
     },
     "commits": [{"modified": ["ocp/sa-and-crb.yaml"]}]
-  }'
-
-# Expected: empty response or {} — a connection error means the Route isn't ready
+  }' \
+  -o /dev/null -w "HTTP %{http_code}\n"
 ```
+
+| Result | Meaning |
+|---|---|
+| `HTTP 200` (no body) | ✅ EDA received the event — check Rulebook Activations → History |
+| `HTTP 000` | ❌ Route unreachable — recheck `oc apply -f ocp/eda-webhook-route.yaml` |
+| `HTTP 4xx` with JSON body | ❌ EDA rejected the request — paste the body for diagnosis |
 
 ### Step 3 — End-to-End Smoke Test
 
