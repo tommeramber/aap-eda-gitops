@@ -51,7 +51,7 @@
         dest: /tmp/gitops-repo
         version: "{{ repo_ref | default(commit_sha) }}"
         force: true
-      no_log: true
+      no_log: true   # prevent token leakage if HTTPS with token in URL
 
     - name: Filter changed_files for YAML manifests only
       ansible.builtin.set_fact:
@@ -71,24 +71,6 @@
       loop: "{{ yaml_files }}"
       register: apply_result
 
-    - name: Send success notification email
-      community.general.mail:
-        host: "{{ lookup('env', 'SMTP_HOST') | default('smtp.gmail.com') }}"
-        port: "{{ lookup('env', 'SMTP_PORT') | default('587') | int }}"
-        username: "{{ lookup('env', 'SMTP_USER') }}"
-        password: "{{ lookup('env', 'SMTP_PASS') }}"
-        to: "{{ notification_email }}"
-        subject: >-
-          [GitOps SUCCESS] {{ yaml_files | length }} manifest(s) applied
-          from {{ commit_sha[:8] }}
-        body: |
-          GitOps automation completed successfully.
-
-          Repository : {{ repo_url }}
-          Commit     : {{ commit_sha }}
-          Applied    :
-          {% for f in yaml_files %}
-            - {{ f }}
-          {% endfor %}
-      when: apply_result is not failed
-      ignore_errors: true
+    # Notification for Scenario A is handled by AAP's built-in Email Notification
+    # configured on the Job Template (Administration → Notifications → Email).
+    # No SMTP task needed here — AAP sends success/failure emails natively.

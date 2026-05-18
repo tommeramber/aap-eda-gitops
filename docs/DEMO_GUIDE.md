@@ -149,7 +149,8 @@ echo $OCP_API_URL
 ## 2. AAP — Core Credentials & Project
 
 > **What belongs here:** only the credentials needed to get AAP talking to OCP and Git.
-> The SMTP credential (for notifications) is created in Section 6 alongside the job template.
+> Email notifications for Scenario A are handled by AAP's built-in Notification system (Section 6) — no SMTP credential type needed here.
+> The SMTP credential for Scenario B's approval email is created in Section 8.
 > The microservice token (for Scenario B) is generated in Section 11.
 
 ### Step 1 — Create Custom Credential Type for OCP
@@ -326,55 +327,53 @@ echo $EDA_WEBHOOK_URL
 
 ---
 
-## 6. Scenario A — Job Template & SMTP Credential
+## 6. Scenario A — Job Template & Email Notification
 
-### Step 1 — Create SMTP Credential Type
+**How email notification works in Scenario A:**  
+The `apply-manifest.yml` playbook does **not** send emails directly. Instead, AAP's
+built-in Notification system sends success/failure emails natively — no SMTP code in
+the playbook, no custom credential type needed for this scenario.
 
-In AAP: **Administration → Credential Types → Add**  
-Name: `SMTP (Notification)`
+For Scenario B, the approval-request playbook *does* send email directly (because it
+must embed the approval reference ID), so SMTP is only configured there (Section 8).
 
-**Input Configuration (YAML):**
-```yaml
-fields:
-  - id: smtp_host
-    type: string
-    label: SMTP Host
-  - id: smtp_port
-    type: string
-    label: SMTP Port
-  - id: smtp_user
-    type: string
-    label: SMTP Username
-  - id: smtp_pass
-    type: string
-    label: SMTP Password
-    secret: true
-required:
-  - smtp_host
-  - smtp_user
-  - smtp_pass
+### Step 1 — Configure Gmail SMTP (Google Workspace / App Password)
+
+> **Why Gmail / Google Workspace:** Red Hat uses Google Workspace, so your
+> `@redhat.com` address is a Gmail account. You can relay outbound mail through
+> `smtp.gmail.com` using a Google **App Password** — a 16-character password Google
+> generates for non-OAuth apps.
+
+**Get a Google App Password:**
+1. Go to [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+   while signed in with your `@redhat.com` account
+2. App: **Mail** → Device: **Other** → name it `aap-demo` → click **Generate**
+3. Copy the 16-character code — that is your SMTP password
+
+```bash
+# Your SMTP settings (used in Steps 2 and 3 below):
+# Host:     smtp.gmail.com
+# Port:     587
+# User:     example@example.com      ← replace with your actual address
+# Password: <16-char App Password>
+# TLS:      Yes
 ```
 
-**Injector Configuration (YAML):**
-```yaml
-env:
-  SMTP_HOST: "{{ smtp_host }}"
-  SMTP_PORT: "{{ smtp_port }}"
-  SMTP_USER: "{{ smtp_user }}"
-  SMTP_PASS: "{{ smtp_pass }}"
-```
+### Step 2 — Create AAP Email Notification (Scenario A success/failure)
 
-### Step 2 — Create SMTP Credential
-
-In AAP: **Credentials → Add**, using type `SMTP (Notification)`.
+In AAP: **Administration → Notifications → Add**
 
 | Field | Value |
 |---|---|
-| Name | `smtp-notification` |
-| SMTP Host | your SMTP server (e.g. `smtp.gmail.com`) |
-| SMTP Port | `587` |
-| SMTP Username | your sender email address |
-| SMTP Password | your SMTP password or Gmail App Password |
+| Name | `gitops-email-notification` |
+| Type | `Email` |
+| Host | `smtp.gmail.com` |
+| Port | `587` |
+| Username | `example@example.com` *(your sender address)* |
+| Password | *(16-char App Password from Step 1)* |
+| Use TLS | Yes |
+| Sender | `example@example.com` |
+| Recipients | `example@example.com` *(address to receive notifications)* |
 
 ### Step 3 — Create Job Template
 
@@ -387,11 +386,21 @@ In AAP: **Templates → Add → Job Template**
 | Project | `aap-gitops-demo` |
 | Playbook | `playbooks/apply-manifest.yml` |
 | Inventory | `Demo Inventory` (playbook runs on localhost) |
-| Credentials | `ocp-demo-cluster` + `smtp-notification` |
+| Credentials | `ocp-demo-cluster` |
 | Extra Variables: Prompt on Launch | **CHECKED** |
 
 > ⚠️ **"Prompt on Launch" is mandatory.** Without it, EDA cannot pass `repo_url`,
 > `commit_sha`, and `changed_files` to the playbook at runtime.
+
+### Step 4 — Attach Notification to Job Template
+
+In the `gitops-apply-networkpolicy` Job Template → **Notifications** tab:
+
+- Enable `gitops-email-notification` on **Success**
+- Enable `gitops-email-notification` on **Failure**
+
+AAP will now automatically email you when the job completes or fails — no playbook
+changes needed.
 
 ---
 
@@ -443,7 +452,62 @@ oc get networkpolicy -A
 
 ## 8. Scenario B — AAP Workflow Template
 
-### Step 1 — Create Job Template: gitops-send-approval-request
+**Why SMTP is needed here (but not in Scenario A):**  
+The `send-approval-request.yml` playbook must embed a unique `WFJ-<id>/<approval_node_id>`
+reference into the email body so the microservice can approve the right workflow node.
+AAP's built-in notification system can't add custom body content, so this email must be
+sent by the playbook directly via `community.general.mail`.
+
+### Step 1 — Create SMTP Credential Type (for Scenario B only)
+
+In AAP: **Administration → Credential Types → Add**  
+Name: `SMTP (Approval Email)`
+
+**Input Configuration (YAML):**
+```yaml
+fields:
+  - id: smtp_host
+    type: string
+    label: SMTP Host
+  - id: smtp_port
+    type: string
+    label: SMTP Port
+  - id: smtp_user
+    type: string
+    label: SMTP Username
+  - id: smtp_pass
+    type: string
+    label: SMTP Password
+    secret: true
+required:
+  - smtp_host
+  - smtp_user
+  - smtp_pass
+```
+
+**Injector Configuration (YAML):**
+```yaml
+env:
+  SMTP_HOST: "{{ smtp_host }}"
+  SMTP_PORT: "{{ smtp_port }}"
+  SMTP_USER: "{{ smtp_user }}"
+  SMTP_PASS: "{{ smtp_pass }}"
+```
+
+### Step 2 — Create SMTP Credential
+
+In AAP: **Credentials → Add**, using type `SMTP (Approval Email)`.  
+Use the same Gmail App Password you generated in Section 6 Step 1.
+
+| Field | Value |
+|---|---|
+| Name | `smtp-approval` |
+| SMTP Host | `smtp.gmail.com` |
+| SMTP Port | `587` |
+| SMTP Username | `example@example.com` *(your sender address)* |
+| SMTP Password | *(16-char App Password)* |
+
+### Step 3 — Create Job Template: gitops-send-approval-request
 
 In AAP: **Templates → Add → Job Template**
 
@@ -453,7 +517,7 @@ In AAP: **Templates → Add → Job Template**
 | Project | `aap-gitops-demo` |
 | Playbook | `playbooks/send-approval-request.yml` |
 | Inventory | `Demo Inventory` |
-| Credentials | `ocp-demo-cluster` + `smtp-notification` |
+| Credentials | `ocp-demo-cluster` + `smtp-approval` |
 | Extra Variables: Prompt on Launch | **CHECKED** |
 
 ### Step 2 — Create Workflow Template
@@ -611,15 +675,15 @@ Any variable showing `len=0` needs to be re-exported before the demo.
 | 1 | OCP: `aap-gitops-sa` SA exists | `oc get sa aap-gitops-sa -n openshift-monitoring` |
 | 2 | AAP: `OCP Cluster (SA Token)` credential type | AAP UI → Administration → Credential Types |
 | 3 | AAP: `ocp-demo-cluster` credential | AAP UI → Credentials |
-| 4 | AAP: `smtp-notification` credential | AAP UI → Credentials |
+| 4 | AAP: `gitops-email-notification` notification | AAP UI → Administration → Notifications |
 | 5 | AAP: `aap-gitops-demo` project synced | AAP UI → Projects → Status: Successful |
-| 6 | AAP: `gitops-apply-networkpolicy` job template | AAP UI → Templates |
+| 6 | AAP: `gitops-apply-networkpolicy` job template (notification attached) | AAP UI → Templates |
 | 7 | EDA: `aap-controller-credential` exists | EDA UI → Credentials |
 | 8 | EDA: `gitops-scenario-a-direct` activation Running | EDA UI → Rulebook Activations |
 | 9 | OCP: EDA Route responds | `curl -sk -o /dev/null -w "%{http_code}" "${EDA_WEBHOOK_URL}"` (not 000) |
 | 10 | GitHub: webhook last delivery = 200 | Repo → Settings → Webhooks |
 | *(Scenario B only)* | | |
-| 11 | AAP: `gitops-send-approval-request` job template | AAP UI → Templates |
+| 11 | AAP: `smtp-approval` credential + `gitops-send-approval-request` job template | AAP UI → Credentials / Templates |
 | 12 | AAP: `gitops-approval-workflow` workflow (3 nodes) | AAP UI → Templates → Visualizer |
 | 13 | OCP: `email-approver` pod Running | `oc get pods -n aap \| grep email-approver` |
 | 14 | Microservice log shows "starting" | `oc logs deployment/email-approver -n aap \| head -5` |
