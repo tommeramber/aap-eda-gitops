@@ -111,13 +111,21 @@ See **[`docs/DEMO_GUIDE.md`](docs/DEMO_GUIDE.md)** for the complete step-by-step
 
 ## Lab Environment
 
-| Component | URL |
-|---|---|
-| OCP Console | `https://console-openshift-console.apps.cluster-jx4b7.dynamic.redhatworkshops.io` |
-| AAP | `https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io` |
-| EDA Webhook | `https://eda-webhook.apps.cluster-jx4b7.dynamic.redhatworkshops.io` |
+All URLs are discovered dynamically from the cluster — no hardcoded values.
+Run the bootstrap block in `docs/DEMO_GUIDE.md → Lab Credentials` to export them:
 
-> ⚠️ Lab credentials are documented in `docs/DEMO_GUIDE.md`. Do not commit real credentials to this repo.
+```bash
+# AAP Platform Gateway
+echo $AAP_URL
+
+# AAP Automation Controller (/api/v2/ endpoint)
+echo $AAP_CONTROLLER_URL
+
+# EDA Webhook (after activation and Route are created)
+echo $EDA_WEBHOOK_URL
+```
+
+> ⚠️ Passwords are not stored in this repo. See `docs/DEMO_GUIDE.md → Lab Credentials` for retrieval commands.
 
 ---
 

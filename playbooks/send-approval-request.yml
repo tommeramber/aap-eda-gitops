@@ -32,7 +32,9 @@
     commit_sha: ""
     changed_files: []
     approver_email: "approver@example.com"
-    aap_base_url: "https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io"
+    # Resolved from the AAP_CONTROLLER_URL env var injected by the credential type.
+    # Set AAP_CONTROLLER_URL in the job template extra_vars or via a custom credential.
+    aap_base_url: "{{ lookup('env', 'AAP_CONTROLLER_URL') }}"
 
   tasks:
 

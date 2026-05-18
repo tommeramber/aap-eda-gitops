@@ -22,7 +22,7 @@ setup. All later commands reference these variables — if you open a new termin
 | `AAP_MICROSERVICE_TOKEN` | Section 11 Step 1 | OCP Secret for the email-approver microservice |
 
 > **AAP_URL vs AAP_CONTROLLER_URL — why two URLs?**  
-> In AAP 2.6, `demo-aap-aap` is the **Platform Gateway** (unified UI entry point). It
+> In AAP 2.6, the Platform Gateway route (from `AnsibleAutomationPlatform` CR) is the unified UI entry point. It
 > handles browser traffic but does **not** expose `/api/v2/` — so EDA's rulebook worker
 > gets a 404 when it tries to connect. EDA must be pointed at the **Automation
 > Controller's own route** (`$AAP_CONTROLLER_URL`) which does serve `/api/v2/`.
@@ -174,7 +174,7 @@ echo "${OCP_SA_TOKEN:0:40}..."
 ```bash
 export OCP_API_URL=$(oc whoami --show-server)
 echo $OCP_API_URL
-# Expected: https://api.cluster-jx4b7.dynamic.redhatworkshops.io:6443
+# Expected: https://api.<your-cluster-domain>:6443
 ```
 
 ---
@@ -305,8 +305,8 @@ In EDA UI: **Credentials → Create**
 >
 > | Symptom | Cause | Fix |
 > |---|---|---|
-> | `404 Not Found /api/v2/config/` | URL points to Platform Gateway (`demo-aap-aap`) | Use `$AAP_CONTROLLER_URL` (`demo-aap-controller-aap`) |
-> | `401 Unauthorized /api/v2/config/` | Using the gateway password (`demo-aap-admin-password`) | Use `$AAP_CONTROLLER_PASS` from `demo-aap-controller-admin-password` |
+> | `404 Not Found /api/v2/config/` | URL points to Platform Gateway | Use `$AAP_CONTROLLER_URL` (AutomationController CR URL) |
+> | `401 Unauthorized /api/v2/config/` | Using the gateway admin password | Use `$AAP_CONTROLLER_PASS` (from `${CTRL_INSTANCE}-admin-password` secret) |
 
 ### Step 2 — Create EDA Project
 
@@ -564,7 +564,11 @@ In AAP: **Templates → Add → Job Template**
 | Playbook | `playbooks/send-approval-request.yml` |
 | Inventory | `Demo Inventory` |
 | Credentials | `ocp-demo-cluster` + `smtp-approval` |
+| Extra Variables | `AAP_CONTROLLER_URL: <paste echo $AAP_CONTROLLER_URL>` |
 | Extra Variables: Prompt on Launch | **CHECKED** |
+
+> The playbook resolves `aap_base_url` via `lookup('env', 'AAP_CONTROLLER_URL')`.
+> Setting it here as an extra_var makes it available as an environment variable at runtime.
 
 ### Step 2 — Create Workflow Template
 
