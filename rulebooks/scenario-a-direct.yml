@@ -33,6 +33,6 @@
               commit_sha: "{{ event.payload.after }}"
               changed_files: >-
                 {{ event.payload.commits
-                   | map(attribute='modified') | flatten
+                   | map(attribute='modified') | sum(start=[])
                    | select('match', '.*\.ya?ml$') | list }}
               repo_ref: "{{ event.payload.after }}"
