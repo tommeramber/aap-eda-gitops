@@ -659,23 +659,28 @@ echo "AAP_MICROSERVICE_TOKEN length: ${#AAP_MICROSERVICE_TOKEN}"
 > If Step 1b shows an HTML 404 page → you used `$AAP_URL` instead of `$AAP_CONTROLLER_URL`.  
 > If Step 1b shows `401 Unauthorized` → check `echo $AAP_CONTROLLER_PASS` is non-empty.
 
-### Step 2 — Fill In and Apply the OCP Secret
+### Step 2 — Generate and Apply the OCP Secret
+
+Set your IMAP credentials, then let `sed` fill everything else from the session variables:
 
 ```bash
-cp ocp/email-approver-secret.example.yaml ocp/email-approver-secret.yaml
-```
+# Set IMAP variables (the only values you need to type manually)
+export IMAP_HOST="imap.gmail.com"
+export IMAP_USER="example@example.com"   # inbox that receives approval replies
+export IMAP_PASS="your-app-password"     # Gmail App Password
 
-Edit `ocp/email-approver-secret.yaml` and set:
+# Generate the secret file — sed substitutes all placeholders from exported variables
+sed \
+  -e "s|__AAP_CONTROLLER_URL__|${AAP_CONTROLLER_URL}|g" \
+  -e "s|__AAP_MICROSERVICE_TOKEN__|${AAP_MICROSERVICE_TOKEN}|g" \
+  -e "s|__IMAP_HOST__|${IMAP_HOST}|g" \
+  -e "s|__IMAP_USER__|${IMAP_USER}|g" \
+  -e "s|__IMAP_PASS__|${IMAP_PASS}|g" \
+  ocp/email-approver-secret.example.yaml > ocp/email-approver-secret.yaml
 
-| Key | Value |
-|---|---|
-| `IMAP_HOST` | your IMAP server (e.g. `imap.gmail.com`) |
-| `IMAP_USER` | the inbox address that receives approval replies |
-| `IMAP_PASS` | IMAP password or Gmail App Password |
-| `AAP_BASE_URL` | `echo $AAP_CONTROLLER_URL` → paste output (controller URL, not gateway) |
-| `AAP_TOKEN` | `echo $AAP_MICROSERVICE_TOKEN` → paste output |
+# Verify no placeholders remain (output should be empty)
+grep "__.*__" ocp/email-approver-secret.yaml && echo "ERROR: unfilled placeholders!" || echo "OK"
 
-```bash
 # Apply (this file is in .gitignore — never commit it)
 oc apply -f ocp/email-approver-secret.yaml -n aap
 ```
