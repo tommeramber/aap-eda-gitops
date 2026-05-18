@@ -14,7 +14,8 @@ setup. All later commands reference these variables — if you open a new termin
 |---|---|---|
 | `AAP_URL` | Lab Credentials | AAP UI login, REST API calls from terminal, OCP Secret `AAP_BASE_URL` |
 | `AAP_CONTROLLER_URL` | Lab Credentials | EDA `aap-controller-credential` URL only — see note below |
-| `AAP_ADMIN_PASS` | Lab Credentials | EDA credential (Section 5), token generation (Section 11) |
+| `AAP_EDA_TOKEN` | Lab Credentials | EDA `aap-controller-credential` token field |
+| `AAP_ADMIN_PASS` | Lab Credentials | Token generation (Section 11) |
 | `OCP_SA_TOKEN` | Section 1 Step 2 | AAP OCP credential (Section 2) |
 | `OCP_API_URL` | Section 1 Step 3 | AAP OCP credential (Section 2) |
 | `EDA_WEBHOOK_URL` | Section 5 Step 4 | GitHub webhook config (Section 7), curl test |
@@ -43,30 +44,40 @@ export AAP_URL="https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.
 echo $AAP_URL
 
 # Automation Controller route — used ONLY in the EDA credential
-# In AAP 2.6 the gateway does not proxy /api/v2/, so EDA must connect directly to
-# the Controller's own route. Discover it with:
-export AAP_CONTROLLER_URL="https://$(oc get routes -n aap \
-  --no-headers -o custom-columns='HOST:.spec.host' \
-  | grep -v 'demo-aap-aap' \
-  | grep -iE 'controller|ctrl' \
-  | head -1)"
-
-# Verify — must print a URL different from $AAP_URL
+# In AAP 2.6 the gateway does not proxy /api/v2/, so EDA must connect directly
+# to the Controller's own route.
+export AAP_CONTROLLER_URL="https://demo-aap-controller-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io"
 echo $AAP_CONTROLLER_URL
 
-# Sanity-check: this must return HTTP 200, not 404
+# Sanity-check: must return HTTP 200
 curl -sk -o /dev/null -w "Controller /api/v2/config/ → HTTP %{http_code}\n" \
   "${AAP_CONTROLLER_URL}/api/v2/config/" \
-  -u "admin:${AAP_ADMIN_PASS}"
+  -H "Authorization: Bearer ${AAP_EDA_TOKEN}"
 ```
 
-> If `$AAP_CONTROLLER_URL` comes out empty, list all routes and find the controller manually:
+> If the cluster domain is different, discover the correct route:
 > ```bash
 > oc get routes -n aap
-> # Look for a route whose HOST does NOT start with 'demo-aap-aap'
-> # Common names: demo-aap-controller, controller, automation-controller
+> # Look for the route that is NOT demo-aap-aap — e.g. demo-aap-controller-aap
 > export AAP_CONTROLLER_URL="https://<that-host>"
 > ```
+
+### Export the AAP EDA Token
+
+In AAP 2.6, the Automation Controller authenticates via the Platform Gateway's OAuth.
+Basic `admin:password` auth on the controller route returns 401. The EDA credential
+must use an **API token** instead.
+
+Create the token in the **AAP UI** first:
+1. Top-right avatar → **Users → admin → Tokens** tab → **Add**
+2. Description: `eda-controller-token` | Scope: **Write** → Save
+3. **Copy the token immediately** — it is shown only once
+
+Then export it:
+```bash
+export AAP_EDA_TOKEN="<paste-token-here>"
+echo "AAP_EDA_TOKEN length: ${#AAP_EDA_TOKEN}"
+```
 
 ### Export the AAP admin password
 
@@ -297,14 +308,16 @@ In EDA UI: **Credentials → Create**
 |---|---|
 | Name | `aap-controller-credential` |
 | Credential Type | `Red Hat Ansible Automation Platform` |
-| URL | `echo $AAP_CONTROLLER_URL` → paste output (**not** `$AAP_URL`) |
-| Username | `admin` |
-| Password | `echo $AAP_ADMIN_PASS` → paste output |
+| URL | `echo $AAP_CONTROLLER_URL` → paste output |
+| Token | `echo $AAP_EDA_TOKEN` → paste output |
 | SSL Verify | `False` (self-signed cert in this lab) |
 
-> ⚠️ **This must be `$AAP_CONTROLLER_URL`, not `$AAP_URL`.**  
-> Using the Platform Gateway URL here causes EDA to fail with:  
-> `404, message='Not Found', url='.../api/v2/config/'`
+> ⚠️ **Two common mistakes that cause activation failures:**
+>
+> | Symptom | Cause | Fix |
+> |---|---|---|
+> | `404 Not Found /api/v2/config/` | URL points to Platform Gateway (`demo-aap-aap`) | Use `$AAP_CONTROLLER_URL` (`demo-aap-controller-aap`) |
+> | `401 Unauthorized /api/v2/config/` | Using username/password instead of token | Use Token field with `$AAP_EDA_TOKEN` |
 
 ### Step 2 — Create EDA Project
 
@@ -698,6 +711,7 @@ oc logs -f deployment/email-approver -n aap
 ```bash
 echo "AAP_URL               = $AAP_URL"
 echo "AAP_CONTROLLER_URL    = $AAP_CONTROLLER_URL"
+echo "AAP_EDA_TOKEN         = ${AAP_EDA_TOKEN:0:20}... (len=${#AAP_EDA_TOKEN})"
 echo "AAP_ADMIN_PASS        = ${AAP_ADMIN_PASS:0:6}... (len=${#AAP_ADMIN_PASS})"
 echo "OCP_SA_TOKEN          = ${OCP_SA_TOKEN:0:40}... (len=${#OCP_SA_TOKEN})"
 echo "OCP_API_URL           = $OCP_API_URL"
