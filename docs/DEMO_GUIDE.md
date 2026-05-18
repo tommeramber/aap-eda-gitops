@@ -12,12 +12,20 @@ setup. All later commands reference these variables — if you open a new termin
 
 | Variable | Set in | Used in |
 |---|---|---|
-| `AAP_URL` | Lab Credentials | Every AAP API call |
+| `AAP_URL` | Lab Credentials | AAP UI login, REST API calls from terminal, OCP Secret `AAP_BASE_URL` |
+| `AAP_CONTROLLER_URL` | Lab Credentials | EDA `aap-controller-credential` URL only — see note below |
 | `AAP_ADMIN_PASS` | Lab Credentials | EDA credential (Section 5), token generation (Section 11) |
 | `OCP_SA_TOKEN` | Section 1 Step 2 | AAP OCP credential (Section 2) |
 | `OCP_API_URL` | Section 1 Step 3 | AAP OCP credential (Section 2) |
 | `EDA_WEBHOOK_URL` | Section 5 Step 4 | GitHub webhook config (Section 7), curl test |
 | `AAP_MICROSERVICE_TOKEN` | Section 11 Step 1 | OCP Secret for the email-approver microservice |
+
+> **AAP_URL vs AAP_CONTROLLER_URL — why two URLs?**  
+> In AAP 2.6, `demo-aap-aap` is the **Platform Gateway** (unified UI entry point). It
+> handles browser traffic but does **not** expose `/api/v2/` — so EDA's rulebook worker
+> gets a 404 when it tries to connect. EDA must be pointed at the **Automation
+> Controller's own route** (`$AAP_CONTROLLER_URL`) which does serve `/api/v2/`.
+> All other API calls (token creation, approval endpoints) go through `$AAP_URL` as normal.
 
 > Run `echo $VARIABLE_NAME` any time a UI field asks you to paste a value.
 
@@ -27,12 +35,38 @@ setup. All later commands reference these variables — if you open a new termin
 
 > ⚠️ Passwords are not stored in this repo. Retrieve and export them before starting.
 
-### Export the AAP base URL
+### Export the AAP URLs
 
 ```bash
+# Platform Gateway — used for the AAP UI, REST API calls, and the microservice Secret
 export AAP_URL="https://demo-aap-aap.apps.cluster-jx4b7.dynamic.redhatworkshops.io"
 echo $AAP_URL
+
+# Automation Controller route — used ONLY in the EDA credential
+# In AAP 2.6 the gateway does not proxy /api/v2/, so EDA must connect directly to
+# the Controller's own route. Discover it with:
+export AAP_CONTROLLER_URL="https://$(oc get routes -n aap \
+  --no-headers -o custom-columns='HOST:.spec.host' \
+  | grep -v 'demo-aap-aap' \
+  | grep -iE 'controller|ctrl' \
+  | head -1)"
+
+# Verify — must print a URL different from $AAP_URL
+echo $AAP_CONTROLLER_URL
+
+# Sanity-check: this must return HTTP 200, not 404
+curl -sk -o /dev/null -w "Controller /api/v2/config/ → HTTP %{http_code}\n" \
+  "${AAP_CONTROLLER_URL}/api/v2/config/" \
+  -u "admin:${AAP_ADMIN_PASS}"
 ```
+
+> If `$AAP_CONTROLLER_URL` comes out empty, list all routes and find the controller manually:
+> ```bash
+> oc get routes -n aap
+> # Look for a route whose HOST does NOT start with 'demo-aap-aap'
+> # Common names: demo-aap-controller, controller, automation-controller
+> export AAP_CONTROLLER_URL="https://<that-host>"
+> ```
 
 ### Export the AAP admin password
 
@@ -263,10 +297,14 @@ In EDA UI: **Credentials → Create**
 |---|---|
 | Name | `aap-controller-credential` |
 | Credential Type | `Red Hat Ansible Automation Platform` |
-| URL | `echo $AAP_URL` → paste output |
+| URL | `echo $AAP_CONTROLLER_URL` → paste output (**not** `$AAP_URL`) |
 | Username | `admin` |
 | Password | `echo $AAP_ADMIN_PASS` → paste output |
 | SSL Verify | `False` (self-signed cert in this lab) |
+
+> ⚠️ **This must be `$AAP_CONTROLLER_URL`, not `$AAP_URL`.**  
+> Using the Platform Gateway URL here causes EDA to fail with:  
+> `404, message='Not Found', url='.../api/v2/config/'`
 
 ### Step 2 — Create EDA Project
 
@@ -659,6 +697,7 @@ oc logs -f deployment/email-approver -n aap
 
 ```bash
 echo "AAP_URL               = $AAP_URL"
+echo "AAP_CONTROLLER_URL    = $AAP_CONTROLLER_URL"
 echo "AAP_ADMIN_PASS        = ${AAP_ADMIN_PASS:0:6}... (len=${#AAP_ADMIN_PASS})"
 echo "OCP_SA_TOKEN          = ${OCP_SA_TOKEN:0:40}... (len=${#OCP_SA_TOKEN})"
 echo "OCP_API_URL           = $OCP_API_URL"
