@@ -44,4 +44,7 @@
                 {{ event.payload.commits | map(attribute='modified') | sum(start=[]) +
                    event.payload.commits | map(attribute='added') | sum(start=[]) }}
               repo_ref: "{{ event.payload.after }}"
-              approver_email: "approver@example.com"
+              # approver_email is intentionally not set here.
+              # Set it as a static extra_var in the AAP Workflow Template
+              # (Templates → gitops-approval-workflow → Extra Variables):
+              #   approver_email: "your-email@example.com"
