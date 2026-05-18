@@ -3,6 +3,8 @@ kind: NetworkPolicy
 metadata:
   name: allow-all
   namespace: default
+  labels:
+    demo: scenario-b-trigger
 spec:
   podSelector: {}
   ingress:
